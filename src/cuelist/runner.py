@@ -22,7 +22,7 @@ def _make_set_event() -> threading.Event:
 class Runner(Generic[Ctx, Target, Delta, Output]):
 
     ctx: Ctx
-    apply_fn: Callable[[dict[Target, Delta]], Output]
+    apply_fn: Callable[[dict[Target, Delta]], Output] | None = None
     output_fn: Callable[[Output], None] | None = None
     fps: float = 40.0
 
@@ -42,6 +42,11 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     @property
     def is_paused(self) -> bool:
         return self._paused
+
+    def _apply(self, deltas: dict[Target, Delta]) -> Output:
+        if self.apply_fn is None:
+            return deltas  # type: ignore[return-value]
+        return self.apply_fn(deltas)
 
     def play(
         self,
@@ -93,12 +98,12 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
 
     def render_frame(self, clip: Clip[Ctx, Target, Delta], t: float) -> Output:
         deltas = clip.render(t, self.ctx)
-        return self.apply_fn(deltas)
+        return self._apply(deltas)
 
     def tick(self, clip: Clip[Ctx, Target, Delta], t: float) -> Output:
         """Render a single frame at time *t* and send it through the output pipeline."""
         deltas = clip.render(t, self.ctx)
-        output = self.apply_fn(deltas)
+        output = self._apply(deltas)
         if self.output_fn is not None:
             self.output_fn(output)
         return output
@@ -131,7 +136,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                 self._elapsed = show_time
 
                 deltas = clip.render(show_time, self.ctx)
-                output = self.apply_fn(deltas)
+                output = self._apply(deltas)
                 if self.output_fn is not None:
                     self.output_fn(output)
 
