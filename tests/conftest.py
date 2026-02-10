@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -36,6 +37,35 @@ class InfiniteClip:
         return {"ch": self.value}
 
 
+@dataclass
+class AsyncStubClip:
+    """Finite clip with async render."""
+
+    value: float
+    clip_duration: float
+
+    @property
+    def duration(self) -> float:
+        return self.clip_duration
+
+    async def render(self, t: float, ctx: object) -> dict[str, float]:
+        return {"ch": self.value * t}
+
+
+@dataclass
+class AsyncInfiniteClip:
+    """Infinite clip with async render."""
+
+    value: float
+
+    @property
+    def duration(self) -> None:
+        return None
+
+    async def render(self, t: float, ctx: object) -> dict[str, float]:
+        return {"ch": self.value}
+
+
 def sum_compose(deltas: list[float]) -> float:
     return sum(deltas)
 
@@ -58,6 +88,16 @@ def timeline() -> Timeline:
 @pytest.fixture
 def tempo_map() -> TempoMap:
     return TempoMap(120.0)
+
+
+@pytest.fixture
+def async_stub_clip() -> AsyncStubClip:
+    return AsyncStubClip(value=2.0, clip_duration=5.0)
+
+
+@pytest.fixture
+def async_infinite_clip() -> AsyncInfiniteClip:
+    return AsyncInfiniteClip(value=1.0)
 
 
 @pytest.fixture

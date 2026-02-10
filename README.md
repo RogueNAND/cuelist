@@ -81,6 +81,40 @@ class FadeClip:
 
 No base class needed. The protocol is runtime-checkable, so `isinstance(obj, Clip)` works.
 
+### Option 3: Async clips
+
+Clips can have an `async def render()` method. Sync and async clips can be freely mixed on the same timeline -- async clips on the same timeline run concurrently via `asyncio.gather()`.
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class AsyncFadeClip:
+    target_value: float
+    fade_time: float
+
+    @property
+    def duration(self) -> float:
+        return self.fade_time
+
+    async def render(self, t: float, ctx) -> dict[str, float]:
+        progress = t / self.fade_time
+        return {"output": self.target_value * progress}
+```
+
+The `clip()` factory also works with async functions:
+
+```python
+from cuelist import clip
+
+async def fetch_and_render(t, ctx):
+    return {"ch": t * 2}
+
+c = clip(5.0, fetch_and_render)
+```
+
+`Timeline.render()` and `BPMTimeline.render()` are `async def` and must be awaited when called directly. The `Runner` handles this transparently -- `play()`, `play_sync()`, `render_frame()`, and `tick()` all work without change.
+
 ## Scheduling
 
 ### Timeline (time-based)
@@ -93,7 +127,7 @@ show.add(0.0, clip(2.0, lambda t, ctx: {"light": t / 2.0}))  # 0s-2s: fade in
 show.add(2.0, clip(3.0, lambda t, ctx: {"light": 1.0}))       # 2s-5s: hold
 
 # Render without a clock -- useful for testing and offline work
-result = show.render(t=1.0, ctx=None)
+result = await show.render(t=1.0, ctx=None)
 ```
 
 #### Chainable API

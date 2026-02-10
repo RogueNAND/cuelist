@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from typing import Callable, Protocol, Self, TypeVar, runtime_checkable
 
@@ -18,6 +20,13 @@ def compose_last(deltas):
 
 def compose_sum(deltas):
     return sum(deltas)
+
+
+async def _resolve_render(clip, t, ctx):
+    result = clip.render(t, ctx)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 @runtime_checkable
@@ -87,13 +96,20 @@ class Timeline:
             max_end = max(max_end, start_time + clip_dur)
         return max_end
 
-    def render(self, t: float, ctx) -> dict:
-        target_deltas: dict = {}
+    async def render(self, t: float, ctx) -> dict:
+        active = []
         for start_time, c in self.events:
             local_t = t - start_time
             if local_t < 0 or (c.duration is not None and local_t > c.duration):
                 continue
-            deltas = c.render(local_t, ctx)
+            active.append((local_t, c))
+        if not active:
+            return {}
+        results = await asyncio.gather(
+            *(_resolve_render(c, lt, ctx) for lt, c in active)
+        )
+        target_deltas: dict = {}
+        for deltas in results:
             for target, delta in deltas.items():
                 target_deltas.setdefault(target, []).append(delta)
         return {

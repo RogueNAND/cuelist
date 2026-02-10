@@ -1,5 +1,7 @@
 """Tests for Clip protocol and Timeline."""
 
+import asyncio
+
 import pytest
 
 from cuelist import BPMTimeline, Clip, Timeline
@@ -56,25 +58,25 @@ class TestTimelineDuration:
 
 class TestTimelineRender:
     def test_empty_timeline_render(self, timeline: Timeline) -> None:
-        assert timeline.render(1.0, None) == {}
+        assert asyncio.run(timeline.render(1.0, None)) == {}
 
     def test_render_before_clip_start(
         self, timeline: Timeline, stub_clip: StubClip
     ) -> None:
         timeline.add(5.0, stub_clip)
-        assert timeline.render(2.0, None) == {}
+        assert asyncio.run(timeline.render(2.0, None)) == {}
 
     def test_render_after_clip_end(
         self, timeline: Timeline, stub_clip: StubClip
     ) -> None:
         timeline.add(0.0, stub_clip)
         # clip duration is 5.0, so t=6.0 is past end
-        assert timeline.render(6.0, None) == {}
+        assert asyncio.run(timeline.render(6.0, None)) == {}
 
     def test_render_mid_clip(self, timeline: Timeline, stub_clip: StubClip) -> None:
         timeline.add(0.0, stub_clip)
         # StubClip renders {"ch": value * t} = {"ch": 2.0 * 2.5}
-        result = timeline.render(2.5, None)
+        result = asyncio.run(timeline.render(2.5, None))
         assert result == {"ch": 5.0}
 
     def test_render_overlapping_clips_composed(self, timeline: Timeline) -> None:
@@ -83,7 +85,7 @@ class TestTimelineRender:
         timeline.add(0.0, clip_a)
         timeline.add(0.0, clip_b)
         # At t=2: clip_a => 1.0*2=2.0, clip_b => 2.0*2=4.0, sum=6.0
-        result = timeline.render(2.0, None)
+        result = asyncio.run(timeline.render(2.0, None))
         assert result == {"ch": 6.0}
 
 
@@ -172,7 +174,7 @@ class TestNestedTimelines:
         outer = Timeline(compose_fn=sum_compose)
         outer.add(1.0, inner)
         # At t=2.0, inner local_t=1.0 => StubClip renders {"ch": 3.0*1.0}
-        result = outer.render(2.0, None)
+        result = asyncio.run(outer.render(2.0, None))
         assert result == {"ch": pytest.approx(3.0)}
 
     def test_nested_duration(self) -> None:
@@ -190,7 +192,7 @@ class TestNestedTimelines:
         outer.add(0.0, StubClip(value=1.0, clip_duration=4.0))
         outer.add(0.0, inner)
         # At t=1.0: direct clip => 1.0*1.0=1.0, nested => 2.0*1.0=2.0, sum=3.0
-        result = outer.render(1.0, None)
+        result = asyncio.run(outer.render(1.0, None))
         assert result == {"ch": pytest.approx(3.0)}
 
     def test_infinite_duration_propagates(self) -> None:

@@ -1,5 +1,7 @@
 """Tests for boilerplate-reduction convenience APIs."""
 
+import asyncio
+
 import pytest
 
 from cuelist import (
@@ -43,7 +45,7 @@ class TestClipFactory:
         tl = Timeline(compose_fn=compose_sum)
         c = clip(2.0, lambda t, ctx: {"ch": t})
         tl.add(0.0, c)
-        assert tl.render(1.0, None) == {"ch": 1.0}
+        assert asyncio.run(tl.render(1.0, None)) == {"ch": 1.0}
 
     def test_works_on_runner(self) -> None:
         c = clip(1.0, lambda t, ctx: {"ch": t * 3})
@@ -74,7 +76,7 @@ class TestComposeFunctions:
         tl = Timeline(compose_fn=compose_last)
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert tl.render(1.0, None) == {"ch": 20.0}
+        assert asyncio.run(tl.render(1.0, None)) == {"ch": 20.0}
 
 
 # ---------------------------------------------------------------------------
@@ -87,31 +89,31 @@ class TestDefaultComposeFn:
         tl = Timeline()
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert tl.render(1.0, None) == {"ch": 20.0}
+        assert asyncio.run(tl.render(1.0, None)) == {"ch": 20.0}
 
     def test_bpm_timeline_default_compose_is_last(self) -> None:
         bt = BPMTimeline()
         bt.add(0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         bt.add(0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert bt.render(0.5, None) == {"ch": 20.0}
+        assert asyncio.run(bt.render(0.5, None)) == {"ch": 20.0}
 
     def test_timeline_explicit_compose_overrides(self) -> None:
         tl = Timeline(compose_fn=compose_sum)
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert tl.render(1.0, None) == {"ch": 30.0}
+        assert asyncio.run(tl.render(1.0, None)) == {"ch": 30.0}
 
     def test_bpm_timeline_explicit_compose_overrides(self) -> None:
         bt = BPMTimeline(compose_fn=compose_sum)
         bt.add(0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         bt.add(0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert bt.render(0.5, None) == {"ch": 30.0}
+        assert asyncio.run(bt.render(0.5, None)) == {"ch": 30.0}
 
     def test_timeline_no_args(self) -> None:
         """Timeline() with no arguments is valid."""
         tl = Timeline()
         assert tl.duration == 0.0
-        assert tl.render(0.0, None) == {}
+        assert asyncio.run(tl.render(0.0, None)) == {}
 
 
 # ---------------------------------------------------------------------------

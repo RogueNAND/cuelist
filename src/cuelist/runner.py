@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import threading
 import time
 from dataclasses import dataclass, field
@@ -96,13 +98,19 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         except KeyboardInterrupt:
             self.stop()
 
+    @staticmethod
+    def _resolve(result):
+        if inspect.isawaitable(result):
+            return asyncio.run(result)
+        return result
+
     def render_frame(self, clip: Clip[Ctx, Target, Delta], t: float) -> Output:
-        deltas = clip.render(t, self.ctx)
+        deltas = self._resolve(clip.render(t, self.ctx))
         return self._apply(deltas)
 
     def tick(self, clip: Clip[Ctx, Target, Delta], t: float) -> Output:
         """Render a single frame at time *t* and send it through the output pipeline."""
-        deltas = clip.render(t, self.ctx)
+        deltas = self._resolve(clip.render(t, self.ctx))
         output = self._apply(deltas)
         if self.output_fn is not None:
             self.output_fn(output)
@@ -126,31 +134,36 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         frame_duration: float,
     ) -> None:
         frame_count = 0
-        try:
-            while not self._stop_event.is_set():
-                show_time = time.monotonic() - start_time
+        with asyncio.Runner() as async_runner:
+            try:
+                while not self._stop_event.is_set():
+                    show_time = time.monotonic() - start_time
 
-                if clip.duration is not None and show_time > clip.duration:
-                    show_time = clip.duration
+                    if clip.duration is not None and show_time > clip.duration:
+                        show_time = clip.duration
 
-                self._elapsed = show_time
+                    self._elapsed = show_time
 
-                deltas = clip.render(show_time, self.ctx)
-                output = self._apply(deltas)
-                if self.output_fn is not None:
-                    self.output_fn(output)
+                    result = clip.render(show_time, self.ctx)
+                    if inspect.isawaitable(result):
+                        deltas = async_runner.run(result)
+                    else:
+                        deltas = result
+                    output = self._apply(deltas)
+                    if self.output_fn is not None:
+                        self.output_fn(output)
 
-                if clip.duration is not None and show_time >= clip.duration:
-                    break
+                    if clip.duration is not None and show_time >= clip.duration:
+                        break
 
-                frame_count += 1
-                next_target = start_time + (frame_count * frame_duration)
-                delay = max(0.0, next_target - time.monotonic())
+                    frame_count += 1
+                    next_target = start_time + (frame_count * frame_duration)
+                    delay = max(0.0, next_target - time.monotonic())
 
-                if self._stop_event.wait(timeout=delay):
-                    break
-        finally:
-            clip_finished = clip.duration is not None and self._elapsed >= clip.duration
-            if not self._paused or clip_finished:
-                self._paused = False
-                self._done_event.set()
+                    if self._stop_event.wait(timeout=delay):
+                        break
+            finally:
+                clip_finished = clip.duration is not None and self._elapsed >= clip.duration
+                if not self._paused or clip_finished:
+                    self._paused = False
+                    self._done_event.set()

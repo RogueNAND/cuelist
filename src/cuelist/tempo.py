@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Self
 
-from .clip import Clip, ComposeFn, compose_last
+from .clip import Clip, ComposeFn, _resolve_render, compose_last
 
 
 @dataclass
@@ -106,14 +107,21 @@ class BPMTimeline:
             max_end = max(max_end, self.tempo_map.time(end_beat))
         return max_end
 
-    def render(self, t: float, ctx) -> dict:
+    async def render(self, t: float, ctx) -> dict:
         current_beat = self.tempo_map.beat(t)
-        target_deltas: dict = {}
+        active = []
         for start_beat, c in self.events:
             local_beat = current_beat - start_beat
             if local_beat < 0 or (c.duration is not None and local_beat > c.duration):
                 continue
-            deltas = c.render(local_beat, ctx)
+            active.append((local_beat, c))
+        if not active:
+            return {}
+        results = await asyncio.gather(
+            *(_resolve_render(c, lb, ctx) for lb, c in active)
+        )
+        target_deltas: dict = {}
+        for deltas in results:
             for target, delta in deltas.items():
                 target_deltas.setdefault(target, []).append(delta)
         return {
