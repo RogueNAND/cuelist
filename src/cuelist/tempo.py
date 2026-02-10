@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Generic
+from typing import Self
 
-from .clip import Clip, Ctx, Delta, Target, _BaseTimeline
+from .clip import Clip, ComposeFn, compose_last
 
 
 @dataclass
@@ -75,29 +75,48 @@ class TempoMap:
 
 
 @dataclass
-class BPMTimeline(_BaseTimeline[Ctx, Target, Delta]):
+class BPMTimeline:
 
+    compose_fn: ComposeFn = field(default=compose_last)
+    events: list[tuple[float, Clip]] = field(default_factory=list)
     tempo_map: TempoMap = field(default_factory=TempoMap)
+
+    def add(self, position: float, clip: Clip) -> Self:
+        self.events.append((position, clip))
+        return self
+
+    def remove(self, position: float, clip: Clip) -> Self:
+        self.events.remove((position, clip))
+        return self
+
+    def clear(self) -> Self:
+        self.events.clear()
+        return self
 
     @property
     def duration(self) -> float | None:
         if not self.events:
             return 0.0
         max_end = 0.0
-        for start_beat, clip in self.events:
-            clip_dur = clip.duration
+        for start_beat, c in self.events:
+            clip_dur = c.duration
             if clip_dur is None:
                 return None
             end_beat = start_beat + clip_dur
             max_end = max(max_end, self.tempo_map.time(end_beat))
         return max_end
 
-    def render(self, t: float, ctx: Ctx) -> dict[Target, Delta]:
+    def render(self, t: float, ctx) -> dict:
         current_beat = self.tempo_map.beat(t)
-        active: list[tuple[float, Clip[Ctx, Target, Delta]]] = []
+        target_deltas: dict = {}
         for start_beat, c in self.events:
             local_beat = current_beat - start_beat
             if local_beat < 0 or (c.duration is not None and local_beat > c.duration):
                 continue
-            active.append((local_beat, c))
-        return self._collect_deltas(active, ctx)
+            deltas = c.render(local_beat, ctx)
+            for target, delta in deltas.items():
+                target_deltas.setdefault(target, []).append(delta)
+        return {
+            target: self.compose_fn(deltas)
+            for target, deltas in target_deltas.items()
+        }

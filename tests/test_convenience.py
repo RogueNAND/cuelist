@@ -3,15 +3,12 @@
 import pytest
 
 from cuelist import (
-    BaseClip,
     BPMTimeline,
     Clip,
     Runner,
     Timeline,
     clip,
-    compose_first,
     compose_last,
-    compose_mean,
     compose_sum,
 )
 
@@ -56,63 +53,6 @@ class TestClipFactory:
 
 
 # ---------------------------------------------------------------------------
-# BaseClip
-# ---------------------------------------------------------------------------
-
-
-class TestBaseClip:
-    def test_satisfies_protocol(self) -> None:
-        class MyClip(BaseClip):
-            def render(self, t, ctx):
-                return {"ch": t}
-
-        c = MyClip(duration=2.0)
-        assert isinstance(c, Clip)
-
-    def test_duration_via_init(self) -> None:
-        class MyClip(BaseClip):
-            def render(self, t, ctx):
-                return {}
-
-        c = MyClip(duration=5.0)
-        assert c.duration == 5.0
-
-    def test_none_duration(self) -> None:
-        class InfClip(BaseClip):
-            def render(self, t, ctx):
-                return {"ch": 1.0}
-
-        c = InfClip()
-        assert c.duration is None
-
-    def test_render_works(self) -> None:
-        class FadeClip(BaseClip):
-            def __init__(self, value: float, dur: float):
-                super().__init__(duration=dur)
-                self.value = value
-
-            def render(self, t, ctx):
-                return {"ch": self.value * t}
-
-        c = FadeClip(value=2.0, dur=3.0)
-        assert c.render(1.5, None) == {"ch": 3.0}
-
-    def test_unimplemented_render_raises(self) -> None:
-        c = BaseClip(duration=1.0)
-        with pytest.raises(NotImplementedError):
-            c.render(0.0, None)
-
-    def test_works_on_timeline(self) -> None:
-        class SimpleClip(BaseClip):
-            def render(self, t, ctx):
-                return {"ch": t}
-
-        tl = Timeline(compose_fn=compose_sum)
-        tl.add(0.0, SimpleClip(duration=2.0))
-        assert tl.render(1.0, None) == {"ch": 1.0}
-
-
-# ---------------------------------------------------------------------------
 # compose functions
 # ---------------------------------------------------------------------------
 
@@ -121,38 +61,20 @@ class TestComposeFunctions:
     def test_compose_last(self) -> None:
         assert compose_last([1, 2, 3]) == 3
 
-    def test_compose_first(self) -> None:
-        assert compose_first([1, 2, 3]) == 1
-
     def test_compose_sum(self) -> None:
         assert compose_sum([1.0, 2.0, 3.0]) == 6.0
-
-    def test_compose_mean(self) -> None:
-        assert compose_mean([2.0, 4.0, 6.0]) == pytest.approx(4.0)
 
     def test_compose_sum_single(self) -> None:
         assert compose_sum([5.0]) == 5.0
 
-    def test_compose_mean_single(self) -> None:
-        assert compose_mean([7.0]) == 7.0
-
     def test_compose_last_single(self) -> None:
         assert compose_last([42]) == 42
-
-    def test_compose_first_single(self) -> None:
-        assert compose_first([42]) == 42
 
     def test_compose_last_on_timeline(self) -> None:
         tl = Timeline(compose_fn=compose_last)
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
         tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
         assert tl.render(1.0, None) == {"ch": 20.0}
-
-    def test_compose_first_on_timeline(self) -> None:
-        tl = Timeline(compose_fn=compose_first)
-        tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 10.0}))
-        tl.add(0.0, clip(2.0, lambda t, ctx: {"ch": 20.0}))
-        assert tl.render(1.0, None) == {"ch": 10.0}
 
 
 # ---------------------------------------------------------------------------
