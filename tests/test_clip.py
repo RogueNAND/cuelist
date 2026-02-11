@@ -201,3 +201,37 @@ class TestNestedTimelines:
         outer = Timeline(compose_fn=sum_compose)
         outer.add(0.0, inner)
         assert outer.duration is None
+
+
+# --- Negative positions ---
+
+
+class TestTimelineNegativePositions:
+    def test_negative_position_duration(self, timeline: Timeline) -> None:
+        timeline.add(-3.0, StubClip(value=1.0, clip_duration=5.0))
+        # end = -3.0 + 5.0 = 2.0
+        assert timeline.duration == pytest.approx(2.0)
+
+    def test_all_negative_duration(self, timeline: Timeline) -> None:
+        timeline.add(-5.0, StubClip(value=1.0, clip_duration=2.0))
+        # end = -5.0 + 2.0 = -3.0
+        assert timeline.duration == pytest.approx(-3.0)
+
+    def test_negative_position_render(self, timeline: Timeline) -> None:
+        timeline.add(-2.0, StubClip(value=3.0, clip_duration=5.0))
+        # At t=0.0, local_t = 0.0 - (-2.0) = 2.0
+        # StubClip renders {"ch": 3.0 * 2.0} = {"ch": 6.0}
+        result = asyncio.run(timeline.render(0.0, None))
+        assert result == {"ch": pytest.approx(6.0)}
+
+    def test_start_property(self, timeline: Timeline) -> None:
+        timeline.add(-3.0, StubClip(value=1.0, clip_duration=5.0))
+        assert timeline.start == -3.0
+
+    def test_start_empty(self, timeline: Timeline) -> None:
+        assert timeline.start == 0.0
+
+    def test_start_mixed_positions(self, timeline: Timeline) -> None:
+        timeline.add(-3.0, StubClip(value=1.0, clip_duration=2.0))
+        timeline.add(2.0, StubClip(value=1.0, clip_duration=1.0))
+        assert timeline.start == -3.0

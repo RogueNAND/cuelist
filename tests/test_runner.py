@@ -363,3 +363,21 @@ class TestTick:
         runner = Runner(ctx=None, apply_fn=lambda d: d, output_fn=None)
         result = runner.tick(clip, t=1.0)
         assert result == {"ch": 2.0}
+
+
+# --- Negative start_at ---
+
+
+class TestNegativeStartAt:
+    def test_play_with_negative_start_at(self) -> None:
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        outputs: list = []
+        runner = Runner(
+            ctx=None,
+            apply_fn=lambda d: d,
+            output_fn=outputs.append,
+            fps=40.0,
+        )
+        runner.play(clip, start_at=-0.1)
+        runner.wait()
+        assert len(outputs) >= 1

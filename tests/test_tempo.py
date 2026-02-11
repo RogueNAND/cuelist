@@ -27,20 +27,38 @@ class TestTempoMapBasics:
         tm = TempoMap(120.0)
         assert tm.time(0.0) == 0.0
 
-    def test_negative_beats_returns_zero(self) -> None:
+    def test_negative_beats_extrapolates(self) -> None:
         tm = TempoMap(120.0)
-        assert tm.time(-1.0) == 0.0
+        # -1 beat at 120 BPM = -0.5s
+        assert tm.time(-1.0) == pytest.approx(-0.5)
 
     def test_zero_seconds_returns_zero_beat(self) -> None:
         tm = TempoMap(120.0)
         assert tm.beat(0.0) == 0.0
 
-    def test_negative_seconds_returns_zero_beat(self) -> None:
+    def test_negative_seconds_extrapolates(self) -> None:
         tm = TempoMap(120.0)
-        assert tm.beat(-1.0) == 0.0
+        # -1s at 120 BPM = -2 beats
+        assert tm.beat(-1.0) == pytest.approx(-2.0)
 
 
 # --- Beat/time roundtrips ---
+
+
+class TestNegativeTimeExtrapolation:
+    def test_negative_beat_roundtrip(self) -> None:
+        tm = TempoMap(120.0)
+        assert tm.beat(tm.time(-2.0)) == pytest.approx(-2.0)
+
+    def test_negative_second_roundtrip(self) -> None:
+        tm = TempoMap(120.0)
+        assert tm.time(tm.beat(-3.0)) == pytest.approx(-3.0)
+
+    def test_negative_beat_with_tempo_change(self) -> None:
+        tm = TempoMap(120.0)
+        tm.set_tempo(4, 60.0)
+        # Negative beats use the initial tempo (120 BPM) regardless of later changes
+        assert tm.time(-2.0) == pytest.approx(-1.0)
 
 
 class TestBeatTimeRoundtrip:
@@ -277,3 +295,40 @@ class TestBPMTimelineClear:
         bt = BPMTimeline(compose_fn=sum_compose)
         result = bt.clear()
         assert result is bt
+
+
+# --- BPMTimeline negative positions ---
+
+
+class TestBPMTimelineNegative:
+    def test_negative_position_duration(self) -> None:
+        bt = BPMTimeline(compose_fn=sum_compose, tempo_map=TempoMap(120.0))
+        clip = StubClip(value=1.0, clip_duration=6.0)
+        bt.add(-4, clip)
+        # end beat = -4 + 6 = 2, at 120 BPM = 1.0s
+        assert bt.duration == pytest.approx(1.0)
+
+    def test_all_negative_duration(self) -> None:
+        bt = BPMTimeline(compose_fn=sum_compose, tempo_map=TempoMap(120.0))
+        clip = StubClip(value=1.0, clip_duration=2.0)
+        bt.add(-4, clip)
+        # end beat = -4 + 2 = -2, at 120 BPM = -1.0s
+        assert bt.duration == pytest.approx(-1.0)
+
+    def test_start_property(self) -> None:
+        bt = BPMTimeline(compose_fn=sum_compose, tempo_map=TempoMap(120.0))
+        bt.add(-4, StubClip(value=1.0, clip_duration=6.0))
+        # beat -4 at 120 BPM = -2.0s
+        assert bt.start == pytest.approx(-2.0)
+
+    def test_start_empty(self) -> None:
+        bt = BPMTimeline(compose_fn=sum_compose)
+        assert bt.start == 0.0
+
+    def test_render_at_negative_time(self) -> None:
+        bt = BPMTimeline(compose_fn=sum_compose, tempo_map=TempoMap(120.0))
+        clip = StubClip(value=1.0, clip_duration=6.0)
+        bt.add(-4, clip)  # starts at beat -4 (-2.0s)
+        # At t=-1.0s, current_beat = -2.0, local_beat = -2.0 - (-4.0) = 2.0
+        # StubClip renders {"ch": 1.0 * 2.0} = {"ch": 2.0}
+        assert asyncio.run(bt.render(-1.0, None)) == {"ch": pytest.approx(2.0)}

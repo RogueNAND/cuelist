@@ -85,15 +85,23 @@ class Timeline:
         return self
 
     @property
+    def start(self) -> float:
+        if not self.events:
+            return 0.0
+        return min(start_time for start_time, _ in self.events)
+
+    @property
     def duration(self) -> float | None:
         if not self.events:
             return 0.0
-        max_end = 0.0
+        max_end = None
         for start_time, c in self.events:
             clip_dur = c.duration
             if clip_dur is None:
                 return None
-            max_end = max(max_end, start_time + clip_dur)
+            end = start_time + clip_dur
+            if max_end is None or end > max_end:
+                max_end = end
         return max_end
 
     async def render(self, t: float, ctx) -> dict:

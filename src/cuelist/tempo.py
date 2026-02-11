@@ -29,9 +29,6 @@ class TempoMap:
 
     def time(self, beats: float) -> float:
         """Convert beat position to seconds."""
-        if beats <= 0:
-            return 0.0
-
         total_seconds = 0.0
         prev_beat = 0.0
         prev_bpm = self._changes[0][1]
@@ -50,9 +47,6 @@ class TempoMap:
 
     def beat(self, seconds: float) -> float:
         """Convert seconds to beat position."""
-        if seconds <= 0:
-            return 0.0
-
         total_beats = 0.0
         prev_beat = 0.0
         prev_bpm = self._changes[0][1]
@@ -95,16 +89,24 @@ class BPMTimeline:
         return self
 
     @property
+    def start(self) -> float:
+        if not self.events:
+            return 0.0
+        return self.tempo_map.time(min(start_beat for start_beat, _ in self.events))
+
+    @property
     def duration(self) -> float | None:
         if not self.events:
             return 0.0
-        max_end = 0.0
+        max_end = None
         for start_beat, c in self.events:
             clip_dur = c.duration
             if clip_dur is None:
                 return None
             end_beat = start_beat + clip_dur
-            max_end = max(max_end, self.tempo_map.time(end_beat))
+            end_time = self.tempo_map.time(end_beat)
+            if max_end is None or end_time > max_end:
+                max_end = end_time
         return max_end
 
     async def render(self, t: float, ctx) -> dict:
