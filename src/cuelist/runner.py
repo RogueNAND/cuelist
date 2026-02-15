@@ -45,6 +45,25 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def is_paused(self) -> bool:
         return self._paused
 
+    @property
+    def elapsed(self) -> float:
+        """Current playback position in seconds."""
+        return self._elapsed
+
+    @property
+    def state(self) -> str:
+        """Current playback state: 'stopped', 'playing', or 'paused'."""
+        if self._paused:
+            return "paused"
+        if self._thread is not None:
+            return "playing"
+        return "stopped"
+
+    @property
+    def clip(self) -> Clip[Ctx, Target, Delta] | None:
+        """Currently loaded clip, or None if stopped."""
+        return self._clip
+
     def _apply(self, deltas: dict[Target, Delta]) -> Output:
         if self.apply_fn is None:
             return deltas  # type: ignore[return-value]
@@ -112,6 +131,16 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         """Render a single frame at time *t* and send it through the output pipeline."""
         deltas = self._resolve(clip.render(t, self.ctx))
         output = self._apply(deltas)
+        if self.output_fn is not None:
+            self.output_fn(output)
+        return output
+
+    async def async_tick(self, clip: Clip[Ctx, Target, Delta], t: float) -> Output:
+        """Async version of tick() for callers already in an event loop."""
+        result = clip.render(t, self.ctx)
+        if inspect.isawaitable(result):
+            result = await result
+        output = self._apply(result)
         if self.output_fn is not None:
             self.output_fn(output)
         return output
