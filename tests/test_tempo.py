@@ -6,7 +6,7 @@ import pytest
 
 from cuelist import BPMTimeline, TempoMap
 
-from conftest import InfiniteClip, StubClip, sum_compose
+from conftest import InfiniteClip, StubClip, resolve, sum_compose
 
 
 # --- TempoMap basics ---
@@ -167,10 +167,10 @@ class TestBPMTimeline:
         clip = StubClip(value=2.0, clip_duration=5.0)
         bt.add(4, clip)  # starts at beat 4 (2.0s at 120 BPM)
         # At t=1.0s, current_beat=2.0, clip hasn't started (beat 4)
-        assert asyncio.run(bt.render(1.0, None)) == {}
+        assert resolve(bt.render(1.0, None)) == {}
         # At t=3.0s, current_beat=6.0, local_beat=6.0-4.0=2.0
         # StubClip renders {"ch": 2.0 * 2.0} = {"ch": 4.0}
-        assert asyncio.run(bt.render(3.0, None)) == {"ch": pytest.approx(4.0)}
+        assert resolve(bt.render(3.0, None)) == {"ch": pytest.approx(4.0)}
 
     def test_render_composition(self) -> None:
         bt = BPMTimeline(compose_fn=sum_compose, tempo_map=TempoMap(120.0))
@@ -180,7 +180,7 @@ class TestBPMTimeline:
         bt.add(0, clip_b)
         # At t=1.0s, current_beat=2.0, local_beat=2.0
         # clip_a => 1.0*2.0=2.0, clip_b => 3.0*2.0=6.0, sum=8.0
-        assert asyncio.run(bt.render(1.0, None)) == {"ch": pytest.approx(8.0)}
+        assert resolve(bt.render(1.0, None)) == {"ch": pytest.approx(8.0)}
 
     def test_add_chainable(self) -> None:
         bt = BPMTimeline(compose_fn=sum_compose)
@@ -207,7 +207,7 @@ class TestBPMTimeline:
         # At t=3.0s: beat(3.0) = 4 + (3.0-2.0)*(60/60) = 5.0
         # local_beat = 5.0 - 4.0 = 1.0
         # StubClip renders {"ch": 1.0 * 1.0} = {"ch": 1.0}
-        assert asyncio.run(bt.render(3.0, None)) == {"ch": pytest.approx(1.0)}
+        assert resolve(bt.render(3.0, None)) == {"ch": pytest.approx(1.0)}
 
 
 # --- set_tempo deduplication ---
@@ -331,4 +331,4 @@ class TestBPMTimelineNegative:
         bt.add(-4, clip)  # starts at beat -4 (-2.0s)
         # At t=-1.0s, current_beat = -2.0, local_beat = -2.0 - (-4.0) = 2.0
         # StubClip renders {"ch": 1.0 * 2.0} = {"ch": 2.0}
-        assert asyncio.run(bt.render(-1.0, None)) == {"ch": pytest.approx(2.0)}
+        assert resolve(bt.render(-1.0, None)) == {"ch": pytest.approx(2.0)}

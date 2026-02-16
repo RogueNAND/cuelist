@@ -1,11 +1,19 @@
 """Shared test fixtures."""
 
 import asyncio
+import inspect
 from dataclasses import dataclass
 
 import pytest
 
 from cuelist import BPMTimeline, TempoMap, Timeline
+
+
+def resolve(result):
+    """Resolve a render result that may be sync (dict) or async (coroutine)."""
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 @dataclass

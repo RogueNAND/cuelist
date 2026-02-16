@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import inspect
 from dataclasses import dataclass, field
 from typing import Callable, Protocol, Self, TypeVar, runtime_checkable
@@ -73,7 +74,7 @@ class Timeline:
     events: list[tuple[float, Clip]] = field(default_factory=list)
 
     def add(self, position: float, clip: Clip) -> Self:
-        self.events.append((position, clip))
+        bisect.insort(self.events, (position, clip), key=lambda e: e[0])
         return self
 
     def remove(self, position: float, clip: Clip) -> Self:
@@ -104,18 +105,45 @@ class Timeline:
                 max_end = end
         return max_end
 
-    async def render(self, t: float, ctx) -> dict:
+    def render(self, t: float, ctx) -> dict:
+        # Binary search: find rightmost event that could be active (start_time <= t)
+        right = bisect.bisect_right(self.events, t, key=lambda e: e[0])
+
         active = []
-        for start_time, c in self.events:
+        for i in range(right - 1, -1, -1):
+            start_time, c = self.events[i]
             local_t = t - start_time
-            if local_t < 0 or (c.duration is not None and local_t > c.duration):
+            if c.duration is not None and local_t > c.duration:
                 continue
             active.append((local_t, c))
         if not active:
             return {}
-        results = await asyncio.gather(
-            *(_resolve_render(c, lt, ctx) for lt, c in active)
-        )
+        active.reverse()
+
+        # Sync fast path: try rendering all clips synchronously
+        results = []
+        for lt, c in active:
+            result = c.render(lt, ctx)
+            if inspect.isawaitable(result):
+                # Fall back to async for remaining clips
+                return self._render_async(active, ctx, results, result)
+            results.append(result)
+
+        return self._compose_results(results)
+
+    async def _render_async(self, active, ctx, partial_results, pending_awaitable):
+        """Async fallback when a clip returns an awaitable."""
+        partial_results.append(await pending_awaitable)
+        # Find where we left off and continue with remaining
+        start_idx = len(partial_results)
+        if start_idx < len(active):
+            remaining = await asyncio.gather(
+                *(_resolve_render(c, lt, ctx) for lt, c in active[start_idx:])
+            )
+            partial_results.extend(remaining)
+        return self._compose_results(partial_results)
+
+    def _compose_results(self, results: list[dict]) -> dict:
         target_deltas: dict = {}
         for deltas in results:
             for target, delta in deltas.items():

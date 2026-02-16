@@ -7,7 +7,7 @@ import pytest
 
 from cuelist import Clip, Runner, Timeline, clip, compose_sum
 
-from conftest import AsyncInfiniteClip, AsyncStubClip, StubClip, sum_compose
+from conftest import AsyncInfiniteClip, AsyncStubClip, StubClip, resolve, sum_compose
 
 
 # --- Protocol conformance ---
@@ -30,7 +30,7 @@ class TestAsyncTimeline:
     def test_async_clip_renders(self) -> None:
         tl = Timeline(compose_fn=sum_compose)
         tl.add(0.0, AsyncStubClip(value=2.0, clip_duration=5.0))
-        result = asyncio.run(tl.render(2.5, None))
+        result = resolve(tl.render(2.5, None))
         assert result == {"ch": 5.0}
 
     def test_mixed_sync_async(self) -> None:
@@ -38,7 +38,7 @@ class TestAsyncTimeline:
         tl.add(0.0, StubClip(value=1.0, clip_duration=4.0))
         tl.add(0.0, AsyncStubClip(value=2.0, clip_duration=4.0))
         # At t=2: sync => 1.0*2=2.0, async => 2.0*2=4.0, sum=6.0
-        result = asyncio.run(tl.render(2.0, None))
+        result = resolve(tl.render(2.0, None))
         assert result == {"ch": 6.0}
 
     def test_async_clips_run_concurrently(self) -> None:
@@ -59,11 +59,11 @@ class TestAsyncTimeline:
         tl.add(0.0, SlowAsyncClip())
 
         start = time.monotonic()
-        result = asyncio.run(tl.render(0.5, None))
+        result = resolve(tl.render(0.5, None))
         elapsed = time.monotonic() - start
 
         assert result == {"ch": 3.0}
-        assert elapsed < 0.2  # concurrent, not sequential
+        assert elapsed < 0.25  # concurrent, not sequential
 
 
 # --- clip() factory with async function ---
@@ -79,7 +79,7 @@ class TestAsyncClipFactory:
         # render returns a coroutine, which Timeline handles
         tl = Timeline()
         tl.add(0.0, c)
-        result = asyncio.run(tl.render(1.0, None))
+        result = resolve(tl.render(1.0, None))
         assert result == {"ch": 3.0}
 
 

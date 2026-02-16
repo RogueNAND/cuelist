@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
+import inspect
 from dataclasses import dataclass, field
 from typing import Self
 
@@ -77,7 +79,7 @@ class BPMTimeline:
     tempo_map: TempoMap = field(default_factory=TempoMap)
 
     def add(self, position: float, clip: Clip) -> Self:
-        self.events.append((position, clip))
+        bisect.insort(self.events, (position, clip), key=lambda e: e[0])
         return self
 
     def remove(self, position: float, clip: Clip) -> Self:
@@ -109,19 +111,42 @@ class BPMTimeline:
                 max_end = end_time
         return max_end
 
-    async def render(self, t: float, ctx) -> dict:
+    def render(self, t: float, ctx) -> dict:
         current_beat = self.tempo_map.beat(t)
+        right = bisect.bisect_right(self.events, current_beat, key=lambda e: e[0])
+
         active = []
-        for start_beat, c in self.events:
+        for i in range(right - 1, -1, -1):
+            start_beat, c = self.events[i]
             local_beat = current_beat - start_beat
-            if local_beat < 0 or (c.duration is not None and local_beat > c.duration):
+            if c.duration is not None and local_beat > c.duration:
                 continue
             active.append((local_beat, c))
         if not active:
             return {}
-        results = await asyncio.gather(
-            *(_resolve_render(c, lb, ctx) for lb, c in active)
-        )
+        active.reverse()
+
+        results = []
+        for lb, c in active:
+            result = c.render(lb, ctx)
+            if inspect.isawaitable(result):
+                return self._render_async(active, ctx, results, result)
+            results.append(result)
+
+        return self._compose_results(results)
+
+    async def _render_async(self, active, ctx, partial_results, pending_awaitable):
+        """Async fallback when a clip returns an awaitable."""
+        partial_results.append(await pending_awaitable)
+        start_idx = len(partial_results)
+        if start_idx < len(active):
+            remaining = await asyncio.gather(
+                *(_resolve_render(c, lt, ctx) for lt, c in active[start_idx:])
+            )
+            partial_results.extend(remaining)
+        return self._compose_results(partial_results)
+
+    def _compose_results(self, results: list[dict]) -> dict:
         target_deltas: dict = {}
         for deltas in results:
             for target, delta in deltas.items():
