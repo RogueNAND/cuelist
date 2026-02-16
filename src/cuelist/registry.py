@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from .schema import generate_schema
+
 
 class ClipRegistry:
 
@@ -14,8 +16,10 @@ class ClipRegistry:
         self._compose_fns: dict[str, Callable] = {}
 
     def register(self, name: str, factory_fn: Callable, schema: Any = None) -> None:
-        """Register a clip factory by name. schema is optional (None for MVP)."""
+        """Register a clip factory by name, auto-generating schema if not provided."""
         self._factories[name] = factory_fn
+        if schema is None:
+            schema = generate_schema(factory_fn)
         self._schemas[name] = schema
 
     def create(self, name: str, params: dict) -> Any:
@@ -27,6 +31,10 @@ class ClipRegistry:
     def list_factories(self) -> dict[str, Any]:
         """Return {name: schema_or_None} for all registered factories."""
         return {name: self._schemas[name] for name in self._factories}
+
+    def list_resources(self) -> list[str]:
+        """Return list of registered resource names."""
+        return list(self._resources.keys())
 
     def register_resource(self, name: str, obj: Any) -> None:
         """Register a non-serializable resource (e.g. Scene instance) by name."""

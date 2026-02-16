@@ -157,13 +157,16 @@ def deserialize_timeline(
         clip_params = clip_data.get("params", {})
 
         if clip_type is not None:
-            resolved_params = _deserialize_params(clip_params, registry)
-            clip_obj = registry.create(clip_type, resolved_params)
-            # Stash metadata for round-trip serialization
-            clip_obj._cuelist_type = clip_type
-            clip_obj._cuelist_params = clip_params
-            if meta:
-                clip_obj._cuelist_meta = meta
-            timeline.add(position, clip_obj)
+            try:
+                resolved_params = _deserialize_params(clip_params, registry)
+                clip_obj = registry.create(clip_type, resolved_params)
+                # Stash metadata for round-trip serialization
+                clip_obj._cuelist_type = clip_type
+                clip_obj._cuelist_params = clip_params
+                if meta:
+                    clip_obj._cuelist_meta = meta
+                timeline.add(position, clip_obj)
+            except Exception:
+                log.exception("Failed to create clip '%s' at position %s", clip_type, position)
 
     return timeline

@@ -2,6 +2,7 @@
 
 from .clip import Clip, ComposeFn, Timeline, clip, compose_last, compose_sum
 from .registry import ClipRegistry, registry
+from .schema import clip_schema
 from .runner import Runner
 from .serde import deserialize_timeline, serialize_timeline
 from .tempo import BPMTimeline, TempoMap
@@ -10,6 +11,7 @@ __all__ = [
     "BPMTimeline",
     "Clip",
     "clip",
+    "clip_schema",
     "ClipRegistry",
     "ComposeFn",
     "compose_last",
