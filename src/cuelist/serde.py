@@ -56,6 +56,30 @@ def _serialize_params(params: dict, registry: ClipRegistry) -> dict:
     return result
 
 
+def _resolve_variables(params: dict, variables: dict) -> dict:
+    """Replace ``{"$var": "name"}`` references with resolved values from *variables*.
+
+    Works on top-level param values and inside list elements (for tuple params).
+    Missing variable names are logged and passed through unchanged.
+    """
+    if not variables:
+        return params
+
+    def _resolve(value):
+        if isinstance(value, dict) and "$var" in value:
+            name = value["$var"]
+            var_def = variables.get(name)
+            if var_def is None:
+                log.warning("Unknown variable reference %r, passing through", name)
+                return value
+            return var_def.get("value")
+        if isinstance(value, list):
+            return [_resolve(item) for item in value]
+        return value
+
+    return {key: _resolve(val) for key, val in params.items()}
+
+
 def _deserialize_params(
     params: dict,
     registry: ClipRegistry,
@@ -144,6 +168,7 @@ def deserialize_timeline(
     Required when the timeline contains nested timeline references.
     """
     tl_type = data.get("type", "Timeline")
+    variables = data.get("variables", {})
 
     # Resolve compose function
     compose_fn_name = data.get("compose_fn")
@@ -198,8 +223,9 @@ def deserialize_timeline(
 
         if clip_type is not None:
             try:
-                clip_schema = registry._schemas.get(clip_type)
-                resolved_params = _deserialize_params(clip_params, registry, schema=clip_schema)
+                clip_schema = registry.get_schema(clip_type)
+                var_resolved = _resolve_variables(clip_params, variables)
+                resolved_params = _deserialize_params(var_resolved, registry, schema=clip_schema)
                 clip_obj = registry.create(clip_type, resolved_params)
                 wrapped = MetadataClip(
                     clip_obj,

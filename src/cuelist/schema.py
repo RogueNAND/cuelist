@@ -27,7 +27,7 @@ def _infer_field(name: str, default: Any, annotation: Any) -> dict:
     """Infer a schema field from parameter name, default, and type annotation."""
     # Name-based heuristics
     if _is_color_name(name):
-        return {"type": "color"}
+        return {"type": "color", "default": [1, 1, 1]}
     if _is_scene_name(name):
         return {"type": "resource"}
 

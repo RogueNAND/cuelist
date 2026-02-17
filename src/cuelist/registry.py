@@ -29,6 +29,10 @@ class ClipRegistry:
             raise KeyError(f"No clip factory registered for {name!r}")
         return self._factories[name](**params)
 
+    def get_schema(self, name: str) -> Any:
+        """Return the schema for a registered factory, or None."""
+        return self._schemas.get(name)
+
     def list_factories(self) -> dict[str, Any]:
         """Return {name: schema_or_None} for all registered factories."""
         return {name: self._schemas[name] for name in self._factories}
