@@ -12,27 +12,55 @@ from .tempo import BPMTimeline, TempoMap
 log = logging.getLogger(__name__)
 
 
+class MetadataClip:
+    """Wrapper that stores serialization metadata alongside a clip.
+
+    Delegates ``render`` and ``duration`` to the inner clip while carrying
+    ``clip_type``, ``params``, ``meta``, and optionally ``timeline_name``
+    for round-trip JSON serialization.
+    """
+
+    def __init__(
+        self,
+        inner,
+        *,
+        clip_type: str | None = None,
+        params: dict | None = None,
+        meta: dict | None = None,
+        timeline_name: str | None = None,
+    ) -> None:
+        self.inner = inner
+        self.clip_type = clip_type
+        self.params = params or {}
+        self.meta = meta or {}
+        self.timeline_name = timeline_name
+
+    @property
+    def duration(self):
+        return self.inner.duration
+
+    def render(self, t, ctx):
+        return self.inner.render(t, ctx)
+
+
 def _serialize_params(params: dict, registry: ClipRegistry) -> dict:
     """Serialize clip params, replacing resource objects with their names."""
     result = {}
     for key, value in params.items():
-        # Check if the value is a registered resource — replace with name
-        found = False
-        for rname, robj in registry._resources.items():
-            if value is robj:
-                result[key] = rname
-                found = True
-                break
-        if not found:
+        rname = registry.find_resource_name(value)
+        if rname is not None:
+            result[key] = rname
+        else:
             result[key] = value
     return result
 
 
 def _deserialize_params(params: dict, registry: ClipRegistry) -> dict:
     """Deserialize clip params, resolving resource name strings."""
+    resource_names = set(registry.list_resources())
     result = {}
     for key, value in params.items():
-        if isinstance(value, str) and value in registry._resources:
+        if isinstance(value, str) and value in resource_names:
             result[key] = registry.get_resource(value)
         else:
             result[key] = value
@@ -44,11 +72,7 @@ def serialize_timeline(timeline: Timeline | BPMTimeline, registry: ClipRegistry)
     is_bpm = isinstance(timeline, BPMTimeline)
 
     # Find compose_fn name
-    compose_fn_name = None
-    for name, fn in registry._compose_fns.items():
-        if fn is timeline.compose_fn:
-            compose_fn_name = name
-            break
+    compose_fn_name = registry.find_compose_name(timeline.compose_fn)
 
     data: dict[str, Any] = {
         "$schema": "cuelist-timeline-v1",
@@ -64,28 +88,25 @@ def serialize_timeline(timeline: Timeline | BPMTimeline, registry: ClipRegistry)
             "bpm": tm.bpm,
             "changes": [
                 {"beat": beat, "bpm": bpm}
-                for beat, bpm in tm._changes[1:]  # skip initial (0, base_bpm)
+                for beat, bpm in tm.changes[1:]  # skip initial (0, base_bpm)
             ],
         }
 
     events = []
     for position, clip_obj in timeline.events:
-        meta = getattr(clip_obj, "_cuelist_meta", {})
         event: dict[str, Any] = {"position": position}
 
-        # Check if this is a nested timeline reference
-        tl_name = getattr(clip_obj, "_cuelist_timeline_name", None)
-        if tl_name is not None:
-            event["timeline"] = {"name": tl_name}
-        else:
-            # Regular clip serialization
-            clip_type = getattr(clip_obj, "_cuelist_type", None)
-            clip_params = getattr(clip_obj, "_cuelist_params", {})
-            if clip_type is not None:
+        if isinstance(clip_obj, MetadataClip):
+            meta = clip_obj.meta
+            if clip_obj.timeline_name is not None:
+                event["timeline"] = {"name": clip_obj.timeline_name}
+            elif clip_obj.clip_type is not None:
                 event["clip"] = {
-                    "type": clip_type,
-                    "params": _serialize_params(clip_params, registry),
+                    "type": clip_obj.clip_type,
+                    "params": _serialize_params(clip_obj.params, registry),
                 }
+        else:
+            meta = {}
 
         if meta:
             event["meta"] = meta
@@ -143,10 +164,12 @@ def deserialize_timeline(
             try:
                 sub_data = load_fn(tl_name)
                 sub_timeline = deserialize_timeline(sub_data, registry, load_fn=load_fn)
-                sub_timeline._cuelist_timeline_name = tl_name
-                if meta:
-                    sub_timeline._cuelist_meta = meta
-                timeline.add(position, sub_timeline)
+                wrapped = MetadataClip(
+                    sub_timeline,
+                    timeline_name=tl_name,
+                    meta=meta if meta else None,
+                )
+                timeline.add(position, wrapped)
             except Exception:
                 log.exception("Failed to load nested timeline '%s'", tl_name)
             continue
@@ -160,12 +183,13 @@ def deserialize_timeline(
             try:
                 resolved_params = _deserialize_params(clip_params, registry)
                 clip_obj = registry.create(clip_type, resolved_params)
-                # Stash metadata for round-trip serialization
-                clip_obj._cuelist_type = clip_type
-                clip_obj._cuelist_params = clip_params
-                if meta:
-                    clip_obj._cuelist_meta = meta
-                timeline.add(position, clip_obj)
+                wrapped = MetadataClip(
+                    clip_obj,
+                    clip_type=clip_type,
+                    params=clip_params,
+                    meta=meta if meta else None,
+                )
+                timeline.add(position, wrapped)
             except Exception:
                 log.exception("Failed to create clip '%s' at position %s", clip_type, position)
 

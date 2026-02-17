@@ -1,13 +1,14 @@
 """Generic timeline library."""
 
-from .clip import Clip, ComposeFn, Timeline, clip, compose_last, compose_sum
+from .clip import BaseTimeline, Clip, ComposeFn, Timeline, clip, compose_last, compose_sum
 from .registry import ClipRegistry, registry
 from .schema import clip_schema
 from .runner import Runner
-from .serde import deserialize_timeline, serialize_timeline
+from .serde import MetadataClip, deserialize_timeline, serialize_timeline
 from .tempo import BPMTimeline, TempoMap
 
 __all__ = [
+    "BaseTimeline",
     "BPMTimeline",
     "Clip",
     "clip",
@@ -17,6 +18,7 @@ __all__ = [
     "compose_last",
     "compose_sum",
     "deserialize_timeline",
+    "MetadataClip",
     "registry",
     "Runner",
     "serialize_timeline",

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import bisect
-import inspect
 from dataclasses import dataclass, field
-from typing import Self
 
-from .clip import Clip, ComposeFn, _resolve_render, compose_last
+from .clip import BaseTimeline
 
 
 @dataclass
@@ -19,6 +15,11 @@ class TempoMap:
 
     def __post_init__(self) -> None:
         self._changes = [(0.0, self.bpm)]
+
+    @property
+    def changes(self) -> list[tuple[float, float]]:
+        """Public read-only access to the tempo change list."""
+        return self._changes
 
     def set_tempo(self, beat: float, bpm: float) -> TempoMap:
         if beat <= 0:
@@ -72,23 +73,9 @@ class TempoMap:
 
 
 @dataclass
-class BPMTimeline:
+class BPMTimeline(BaseTimeline):
 
-    compose_fn: ComposeFn = field(default=compose_last)
-    events: list[tuple[float, Clip]] = field(default_factory=list)
     tempo_map: TempoMap = field(default_factory=TempoMap)
-
-    def add(self, position: float, clip: Clip) -> Self:
-        bisect.insort(self.events, (position, clip), key=lambda e: e[0])
-        return self
-
-    def remove(self, position: float, clip: Clip) -> Self:
-        self.events.remove((position, clip))
-        return self
-
-    def clear(self) -> Self:
-        self.events.clear()
-        return self
 
     @property
     def start(self) -> float:
@@ -112,46 +99,4 @@ class BPMTimeline:
         return max_end
 
     def render(self, t: float, ctx) -> dict:
-        current_beat = self.tempo_map.beat(t)
-        right = bisect.bisect_right(self.events, current_beat, key=lambda e: e[0])
-
-        active = []
-        for i in range(right - 1, -1, -1):
-            start_beat, c = self.events[i]
-            local_beat = current_beat - start_beat
-            if c.duration is not None and local_beat > c.duration:
-                continue
-            active.append((local_beat, c))
-        if not active:
-            return {}
-        active.reverse()
-
-        results = []
-        for lb, c in active:
-            result = c.render(lb, ctx)
-            if inspect.isawaitable(result):
-                return self._render_async(active, ctx, results, result)
-            results.append(result)
-
-        return self._compose_results(results)
-
-    async def _render_async(self, active, ctx, partial_results, pending_awaitable):
-        """Async fallback when a clip returns an awaitable."""
-        partial_results.append(await pending_awaitable)
-        start_idx = len(partial_results)
-        if start_idx < len(active):
-            remaining = await asyncio.gather(
-                *(_resolve_render(c, lt, ctx) for lt, c in active[start_idx:])
-            )
-            partial_results.extend(remaining)
-        return self._compose_results(partial_results)
-
-    def _compose_results(self, results: list[dict]) -> dict:
-        target_deltas: dict = {}
-        for deltas in results:
-            for target, delta in deltas.items():
-                target_deltas.setdefault(target, []).append(delta)
-        return {
-            target: self.compose_fn(deltas)
-            for target, deltas in target_deltas.items()
-        }
+        return self._render_at(self.tempo_map.beat(t), ctx)

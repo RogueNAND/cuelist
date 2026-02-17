@@ -68,7 +68,13 @@ def clip(
 
 
 @dataclass
-class Timeline:
+class BaseTimeline:
+    """Shared base for Timeline and BPMTimeline.
+
+    Provides event storage, add/remove/clear, the render pipeline
+    (sync-first with async fallback), and result composition.
+    Subclasses implement ``render``, ``start``, and ``duration``.
+    """
 
     compose_fn: ComposeFn = field(default=compose_last)
     events: list[tuple[float, Clip]] = field(default_factory=list)
@@ -85,34 +91,14 @@ class Timeline:
         self.events.clear()
         return self
 
-    @property
-    def start(self) -> float:
-        if not self.events:
-            return 0.0
-        return min(start_time for start_time, _ in self.events)
-
-    @property
-    def duration(self) -> float | None:
-        if not self.events:
-            return 0.0
-        max_end = None
-        for start_time, c in self.events:
-            clip_dur = c.duration
-            if clip_dur is None:
-                return None
-            end = start_time + clip_dur
-            if max_end is None or end > max_end:
-                max_end = end
-        return max_end
-
-    def render(self, t: float, ctx) -> dict:
-        # Binary search: find rightmost event that could be active (start_time <= t)
-        right = bisect.bisect_right(self.events, t, key=lambda e: e[0])
+    def _render_at(self, position: float, ctx) -> dict:
+        """Core render logic: find active clips at *position* and compose."""
+        right = bisect.bisect_right(self.events, position, key=lambda e: e[0])
 
         active = []
         for i in range(right - 1, -1, -1):
-            start_time, c = self.events[i]
-            local_t = t - start_time
+            start_pos, c = self.events[i]
+            local_t = position - start_pos
             if c.duration is not None and local_t > c.duration:
                 continue
             active.append((local_t, c))
@@ -152,3 +138,30 @@ class Timeline:
             target: self.compose_fn(deltas)
             for target, deltas in target_deltas.items()
         }
+
+
+@dataclass
+class Timeline(BaseTimeline):
+
+    @property
+    def start(self) -> float:
+        if not self.events:
+            return 0.0
+        return min(start_time for start_time, _ in self.events)
+
+    @property
+    def duration(self) -> float | None:
+        if not self.events:
+            return 0.0
+        max_end = None
+        for start_time, c in self.events:
+            clip_dur = c.duration
+            if clip_dur is None:
+                return None
+            end = start_time + clip_dur
+            if max_end is None or end > max_end:
+                max_end = end
+        return max_end
+
+    def render(self, t: float, ctx) -> dict:
+        return self._render_at(t, ctx)

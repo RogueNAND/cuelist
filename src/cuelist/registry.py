@@ -56,5 +56,19 @@ class ClipRegistry:
             raise KeyError(f"No compose function registered for {name!r}")
         return self._compose_fns[name]
 
+    def find_resource_name(self, obj: Any) -> str | None:
+        """Return the registered name for a resource object, or None."""
+        for name, robj in self._resources.items():
+            if robj is obj:
+                return name
+        return None
+
+    def find_compose_name(self, fn: Callable) -> str | None:
+        """Return the registered name for a compose function, or None."""
+        for name, cfn in self._compose_fns.items():
+            if cfn is fn:
+                return name
+        return None
+
 
 registry = ClipRegistry()
