@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .clip import Timeline
 from .registry import ClipRegistry
+from .seteval import evaluate_set
 from .tempo import BPMTimeline, TempoMap
 
 log = logging.getLogger(__name__)
@@ -55,12 +56,28 @@ def _serialize_params(params: dict, registry: ClipRegistry) -> dict:
     return result
 
 
-def _deserialize_params(params: dict, registry: ClipRegistry) -> dict:
-    """Deserialize clip params, resolving resource name strings."""
+def _deserialize_params(
+    params: dict,
+    registry: ClipRegistry,
+    schema: dict | None = None,
+) -> dict:
+    """Deserialize clip params, resolving resource names and set operations."""
     resource_names = set(registry.list_resources())
+    schema_params = (schema or {}).get("params", {})
     result = {}
     for key, value in params.items():
-        if isinstance(value, str) and value in resource_names:
+        field_schema = schema_params.get(key, {})
+
+        # Set-type: resolve operations list to a composed object
+        if field_schema.get("type") == "set" and isinstance(value, list):
+            items_key = field_schema.get("items_key", "")
+            try:
+                mapping = registry.get_set(items_key)
+                result[key] = evaluate_set(value, mapping)
+            except (KeyError, ValueError):
+                log.warning("Failed to evaluate set param %r, passing through", key)
+                result[key] = value
+        elif isinstance(value, str) and value in resource_names:
             result[key] = registry.get_resource(value)
         else:
             result[key] = value
@@ -181,7 +198,8 @@ def deserialize_timeline(
 
         if clip_type is not None:
             try:
-                resolved_params = _deserialize_params(clip_params, registry)
+                clip_schema = registry._schemas.get(clip_type)
+                resolved_params = _deserialize_params(clip_params, registry, schema=clip_schema)
                 clip_obj = registry.create(clip_type, resolved_params)
                 wrapped = MetadataClip(
                     clip_obj,

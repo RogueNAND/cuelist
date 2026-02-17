@@ -5,6 +5,7 @@ from .registry import ClipRegistry, registry
 from .schema import clip_schema
 from .runner import Runner
 from .serde import MetadataClip, deserialize_timeline, serialize_timeline
+from .seteval import evaluate_set
 from .tempo import BPMTimeline, TempoMap
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "compose_last",
     "compose_sum",
     "deserialize_timeline",
+    "evaluate_set",
     "MetadataClip",
     "registry",
     "Runner",

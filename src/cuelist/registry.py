@@ -14,6 +14,7 @@ class ClipRegistry:
         self._schemas: dict[str, Any] = {}
         self._resources: dict[str, Any] = {}
         self._compose_fns: dict[str, Callable] = {}
+        self._sets: dict[str, dict[str, Any]] = {}
 
     def register(self, name: str, factory_fn: Callable, schema: Any = None) -> None:
         """Register a clip factory by name, auto-generating schema if not provided."""
@@ -69,6 +70,23 @@ class ClipRegistry:
             if cfn is fn:
                 return name
         return None
+
+    def register_set(self, key: str, mapping: dict[str, Any]) -> None:
+        """Register a named collection of set-like objects.
+
+        Example: ``register_set("fixture_groups", {"front": front, "bar": bar})``
+        """
+        self._sets[key] = mapping
+
+    def list_sets(self) -> dict[str, list[str]]:
+        """Return ``{key: [item_names...]}`` for all registered set collections."""
+        return {key: list(mapping.keys()) for key, mapping in self._sets.items()}
+
+    def get_set(self, key: str) -> dict[str, Any]:
+        """Retrieve a set collection mapping by key."""
+        if key not in self._sets:
+            raise KeyError(f"No set collection registered for {key!r}")
+        return self._sets[key]
 
 
 registry = ClipRegistry()
