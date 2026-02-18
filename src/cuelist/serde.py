@@ -111,7 +111,12 @@ def _deserialize_params(
 
 
 def serialize_timeline(timeline: Timeline | BPMTimeline, registry: ClipRegistry) -> dict:
-    """Convert a Timeline or BPMTimeline to a JSON-compatible dict."""
+    """Convert a Timeline or BPMTimeline to a JSON-compatible dict.
+
+    Note: Editor-specific fields (``templates``, ``variables``, ``audio``)
+    are NOT produced here — they are managed by the cuelist-editor frontend
+    and injected directly into the timeline JSON on save.
+    """
     is_bpm = isinstance(timeline, BPMTimeline)
 
     # Find compose_fn name
@@ -168,8 +173,13 @@ def deserialize_timeline(
 ) -> Timeline | BPMTimeline:
     """Reconstruct a Timeline or BPMTimeline from a JSON dict.
 
-    load_fn: optional callback that loads a sub-timeline's JSON data by name.
+    *load_fn*: optional callback that loads a sub-timeline's JSON data by name.
     Required when the timeline contains nested timeline references.
+
+    Editor-injected fields consumed here but not produced by
+    ``serialize_timeline``: ``templates`` (clip parameter presets)
+    and ``variables`` (``{"$var": "name"}`` value substitution).
+    The ``audio`` array is editor-only and ignored by deserialization.
     """
     tl_type = data.get("type", "Timeline")
     variables = data.get("variables", {})
@@ -234,6 +244,12 @@ def deserialize_timeline(
         if template_id:
             template = templates.get(template_id)
             if template is not None:
+                tpl_clip_type = template.get("clipType")
+                if tpl_clip_type and tpl_clip_type != clip_type:
+                    log.warning(
+                        "Template '%s' clipType mismatch at position %s: expected '%s', got '%s'",
+                        template_id, position, clip_type, tpl_clip_type,
+                    )
                 clip_params = {**template.get("params", {}), **clip_params}
             else:
                 log.warning("Template '%s' not found, skipping merge at position %s", template_id, position)

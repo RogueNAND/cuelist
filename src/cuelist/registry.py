@@ -13,7 +13,9 @@ class ClipRegistry:
         self._factories: dict[str, Callable] = {}
         self._schemas: dict[str, Any] = {}
         self._resources: dict[str, Any] = {}
+        self._resource_ids: dict[int, str] = {}
         self._compose_fns: dict[str, Callable] = {}
+        self._compose_ids: dict[int, str] = {}
         self._sets: dict[str, dict[str, Any]] = {}
 
     def register(self, name: str, factory_fn: Callable, schema: Any = None) -> None:
@@ -44,6 +46,7 @@ class ClipRegistry:
     def register_resource(self, name: str, obj: Any) -> None:
         """Register a non-serializable resource (e.g. Scene instance) by name."""
         self._resources[name] = obj
+        self._resource_ids[id(obj)] = name
 
     def get_resource(self, name: str) -> Any:
         """Retrieve a registered resource by name."""
@@ -54,6 +57,7 @@ class ClipRegistry:
     def register_compose(self, name: str, fn: Callable) -> None:
         """Register a compose function by name."""
         self._compose_fns[name] = fn
+        self._compose_ids[id(fn)] = name
 
     def get_compose(self, name: str) -> Callable:
         """Retrieve a registered compose function by name."""
@@ -63,17 +67,11 @@ class ClipRegistry:
 
     def find_resource_name(self, obj: Any) -> str | None:
         """Return the registered name for a resource object, or None."""
-        for name, robj in self._resources.items():
-            if robj is obj:
-                return name
-        return None
+        return self._resource_ids.get(id(obj))
 
     def find_compose_name(self, fn: Callable) -> str | None:
         """Return the registered name for a compose function, or None."""
-        for name, cfn in self._compose_fns.items():
-            if cfn is fn:
-                return name
-        return None
+        return self._compose_ids.get(id(fn))
 
     def register_set(self, key: str, mapping: dict[str, Any]) -> None:
         """Register a named collection of set-like objects.
