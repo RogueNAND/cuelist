@@ -170,3 +170,190 @@ class TestDeserializeWithVariables:
 
         # Serialized events keep the $var reference
         assert serialized["events"][0]["clip"]["params"]["color"] == {"$var": "c"}
+
+
+# -- deserialize_timeline with templates --------------------------------------
+
+class TestTemplateDeserialization:
+
+    def test_template_params_merged(self):
+        """Template params are merged into the clip; event params layer on top."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "templates": {
+                "tpl_1": {
+                    "type": "test_clip",
+                    "params": {"color": [1, 0, 0], "level": 0.5},
+                },
+            },
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "tpl_1",
+                        "params": {"duration": 8},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert len(tl.events) == 1
+
+        _, clip = tl.events[0]
+        assert isinstance(clip, MetadataClip)
+        # The inner clip was created with merged params (template + instance)
+        assert clip.inner.duration == 8
+        # MetadataClip stores only instance params for round-trip
+        assert clip.params == {"duration": 8}
+        assert clip.template_id == "tpl_1"
+
+    def test_template_instance_overrides_template(self):
+        """Instance param wins when both template and event define the same key."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "templates": {
+                "tpl_x": {
+                    "type": "test_clip",
+                    "params": {"duration": 4, "level": 0.3},
+                },
+            },
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "tpl_x",
+                        "params": {"level": 0.9},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        _, clip = tl.events[0]
+        assert isinstance(clip, MetadataClip)
+        # Instance override stored in params
+        assert clip.params == {"level": 0.9}
+        assert clip.template_id == "tpl_x"
+
+    def test_missing_template_graceful(self):
+        """Event referencing a non-existent templateId still creates a clip from its own params."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "templates": {},
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "does_not_exist",
+                        "params": {"duration": 2, "color": [0, 1, 0]},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert len(tl.events) == 1
+        _, clip = tl.events[0]
+        assert isinstance(clip, MetadataClip)
+        assert clip.inner.duration == 2
+
+    def test_no_templates_key_backward_compat(self):
+        """Timeline JSON without a 'templates' key works exactly as before."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "params": {"duration": 4, "color": [1, 1, 1], "level": 1.0},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert len(tl.events) == 1
+        _, clip = tl.events[0]
+        assert isinstance(clip, MetadataClip)
+        assert clip.inner.duration == 4
+        assert clip.template_id is None
+
+    def test_template_round_trip(self):
+        """Serialize a template-linked clip: templateId preserved, only instance params emitted."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "templates": {
+                "tpl_rt": {
+                    "type": "test_clip",
+                    "params": {"color": [1, 0, 0], "level": 0.5},
+                },
+            },
+            "events": [
+                {
+                    "position": 4,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "tpl_rt",
+                        "params": {"duration": 16},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        serialized = serialize_timeline(tl, reg)
+
+        ev = serialized["events"][0]
+        assert ev["clip"]["templateId"] == "tpl_rt"
+        # Only instance params are serialized, not the merged template params
+        assert ev["clip"]["params"] == {"duration": 16}
+
+    def test_template_with_variables(self):
+        """Variable references in template params are resolved when creating the clip."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "variables": {
+                "red": {"type": "color", "value": [1, 0, 0]},
+            },
+            "templates": {
+                "tpl_var": {
+                    "type": "test_clip",
+                    "params": {"color": {"$var": "red"}, "level": 0.8},
+                },
+            },
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "tpl_var",
+                        "params": {"duration": 4},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert len(tl.events) == 1
+        _, clip = tl.events[0]
+        assert isinstance(clip, MetadataClip)
+        assert clip.template_id == "tpl_var"
+        # Instance params only
+        assert clip.params == {"duration": 4}

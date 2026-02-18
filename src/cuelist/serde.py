@@ -29,12 +29,14 @@ class MetadataClip:
         params: dict | None = None,
         meta: dict | None = None,
         timeline_name: str | None = None,
+        template_id: str | None = None,
     ) -> None:
         self.inner = inner
         self.clip_type = clip_type
         self.params = params or {}
         self.meta = meta or {}
         self.timeline_name = timeline_name
+        self.template_id = template_id
 
     @property
     def duration(self):
@@ -146,6 +148,8 @@ def serialize_timeline(timeline: Timeline | BPMTimeline, registry: ClipRegistry)
                     "type": clip_obj.clip_type,
                     "params": _serialize_params(clip_obj.params, registry),
                 }
+                if clip_obj.template_id:
+                    event["clip"]["templateId"] = clip_obj.template_id
         else:
             meta = {}
 
@@ -169,6 +173,7 @@ def deserialize_timeline(
     """
     tl_type = data.get("type", "Timeline")
     variables = data.get("variables", {})
+    templates = data.get("templates", {})
 
     # Resolve compose function
     compose_fn_name = data.get("compose_fn")
@@ -222,6 +227,16 @@ def deserialize_timeline(
         clip_data = event.get("clip", {})
         clip_type = clip_data.get("type")
         clip_params = clip_data.get("params", {})
+        template_id = clip_data.get("templateId")
+
+        # Merge template defaults under instance overrides
+        raw_instance_params = dict(clip_params)
+        if template_id:
+            template = templates.get(template_id)
+            if template is not None:
+                clip_params = {**template.get("params", {}), **clip_params}
+            else:
+                log.warning("Template '%s' not found, skipping merge at position %s", template_id, position)
 
         if clip_type is not None:
             try:
@@ -232,8 +247,9 @@ def deserialize_timeline(
                 wrapped = MetadataClip(
                     clip_obj,
                     clip_type=clip_type,
-                    params=clip_params,
+                    params=raw_instance_params,
                     meta=meta if meta else None,
+                    template_id=template_id,
                 )
                 timeline.add(position, wrapped)
             except KeyError as e:
