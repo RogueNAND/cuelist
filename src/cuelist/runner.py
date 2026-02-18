@@ -53,6 +53,10 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         """Current playback position in seconds."""
         return self._elapsed
 
+    def set_elapsed(self, t: float) -> None:
+        """Set the current playback position (seconds). For use by external controllers."""
+        self._elapsed = t
+
     @property
     def state(self) -> str:
         """Current playback state: 'stopped', 'playing', or 'paused'."""
