@@ -185,9 +185,12 @@ def deserialize_timeline(
     variables = data.get("variables", {})
     templates = data.get("templates", {})
 
-    # Resolve compose function
+    # Resolve compose function (fall back to registry default)
     compose_fn_name = data.get("compose_fn")
-    compose_fn = registry.get_compose(compose_fn_name) if compose_fn_name else None
+    if compose_fn_name:
+        compose_fn = registry.get_compose(compose_fn_name)
+    else:
+        _, compose_fn = registry.get_default_compose()
 
     if tl_type == "BPMTimeline":
         tempo_data = data.get("tempo", {})

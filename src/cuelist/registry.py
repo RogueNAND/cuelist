@@ -16,6 +16,8 @@ class ClipRegistry:
         self._resource_ids: dict[int, str] = {}
         self._compose_fns: dict[str, Callable] = {}
         self._compose_ids: dict[int, str] = {}
+        self._default_compose_name: str | None = None
+        self._default_compose_fn: Callable | None = None
         self._sets: dict[str, dict[str, Any]] = {}
 
     def register(self, name: str, factory_fn: Callable, schema: Any = None) -> None:
@@ -54,10 +56,18 @@ class ClipRegistry:
             raise KeyError(f"No resource registered for {name!r}")
         return self._resources[name]
 
-    def register_compose(self, name: str, fn: Callable) -> None:
-        """Register a compose function by name."""
+    def register_compose(self, name: str, fn: Callable, *, default: bool = False) -> None:
+        """Register a compose function by name.
+
+        The first registered function (or any with ``default=True``)
+        becomes the fallback used by ``deserialize_timeline`` when the
+        JSON data does not specify a ``compose_fn``.
+        """
         self._compose_fns[name] = fn
         self._compose_ids[id(fn)] = name
+        if default or self._default_compose_fn is None:
+            self._default_compose_name = name
+            self._default_compose_fn = fn
 
     def get_compose(self, name: str) -> Callable:
         """Retrieve a registered compose function by name."""
@@ -68,6 +78,10 @@ class ClipRegistry:
     def find_resource_name(self, obj: Any) -> str | None:
         """Return the registered name for a resource object, or None."""
         return self._resource_ids.get(id(obj))
+
+    def get_default_compose(self) -> tuple[str | None, Callable | None]:
+        """Return *(name, fn)* for the default compose function, or *(None, None)*."""
+        return self._default_compose_name, self._default_compose_fn
 
     def find_compose_name(self, fn: Callable) -> str | None:
         """Return the registered name for a compose function, or None."""

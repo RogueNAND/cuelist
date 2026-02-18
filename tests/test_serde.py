@@ -323,6 +323,33 @@ class TestTemplateDeserialization:
         # Only instance params are serialized, not the merged template params
         assert ev["clip"]["params"] == {"duration": 16}
 
+    def test_template_cliptype_mismatch_warning(self):
+        """Template with a mismatched clipType logs a warning but still works."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "templates": {
+                "tpl_mm": {
+                    "clipType": "other_clip",
+                    "params": {"color": [1, 0, 0]},
+                },
+            },
+            "events": [
+                {
+                    "position": 0,
+                    "clip": {
+                        "type": "test_clip",
+                        "templateId": "tpl_mm",
+                        "params": {"duration": 4},
+                    },
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert len(tl.events) == 1
+
     def test_template_with_variables(self):
         """Variable references in template params are resolved when creating the clip."""
         reg = make_registry()
@@ -357,3 +384,78 @@ class TestTemplateDeserialization:
         assert clip.template_id == "tpl_var"
         # Instance params only
         assert clip.params == {"duration": 4}
+
+
+# -- compose_fn deserialization ------------------------------------------------
+
+class TestDeserializeComposeFn:
+
+    def test_json_compose_fn_used(self):
+        """compose_fn in JSON is resolved from registry and used."""
+        reg = make_registry()
+        my_compose = lambda deltas: deltas[0]
+        reg.register_compose("my_compose", my_compose)
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "compose_fn": "my_compose",
+            "events": [],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert tl.compose_fn is my_compose
+
+    def test_registry_default_used_when_no_compose_fn(self):
+        """When JSON has no compose_fn, the registry default is used."""
+        reg = make_registry()
+        my_compose = lambda deltas: deltas[0]
+        reg.register_compose("my_compose", my_compose)
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert tl.compose_fn is my_compose
+
+    def test_no_default_falls_back_to_compose_last(self):
+        """Without registry default or JSON compose_fn, BaseTimeline default is used."""
+        reg = make_registry()
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [],
+        }
+        tl = deserialize_timeline(data, reg)
+        from cuelist.clip import compose_last
+        assert tl.compose_fn is compose_last
+
+    def test_compose_fn_round_trip(self):
+        """compose_fn survives serialize -> deserialize."""
+        reg = make_registry()
+        my_compose = lambda deltas: deltas[0]
+        reg.register_compose("my_compose", my_compose)
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "compose_fn": "my_compose",
+            "events": [],
+        }
+        tl = deserialize_timeline(data, reg)
+        serialized = serialize_timeline(tl, reg)
+        assert serialized["compose_fn"] == "my_compose"
+
+    def test_timeline_type_also_uses_default(self):
+        """Plain Timeline (not BPMTimeline) also gets the registry default."""
+        reg = make_registry()
+        my_compose = lambda deltas: deltas[0]
+        reg.register_compose("my_compose", my_compose)
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [],
+        }
+        tl = deserialize_timeline(data, reg)
+        assert tl.compose_fn is my_compose

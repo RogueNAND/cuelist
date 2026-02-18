@@ -62,3 +62,40 @@ class TestListSets:
         reg.register_set("ng", {"item": NoneGroup()})
         result = reg.list_sets()
         assert result == {"ng": [{"name": "item"}]}
+
+
+class TestDefaultCompose:
+
+    def test_first_register_becomes_default(self) -> None:
+        reg = ClipRegistry()
+        fn = lambda deltas: sum(deltas)
+        reg.register_compose("mysum", fn)
+        name, default_fn = reg.get_default_compose()
+        assert name == "mysum"
+        assert default_fn is fn
+
+    def test_no_default_when_empty(self) -> None:
+        reg = ClipRegistry()
+        name, fn = reg.get_default_compose()
+        assert name is None
+        assert fn is None
+
+    def test_explicit_default_overrides(self) -> None:
+        reg = ClipRegistry()
+        fn_a = lambda d: d[0]
+        fn_b = lambda d: d[-1]
+        reg.register_compose("a", fn_a)
+        reg.register_compose("b", fn_b, default=True)
+        name, fn = reg.get_default_compose()
+        assert name == "b"
+        assert fn is fn_b
+
+    def test_second_register_does_not_override_default(self) -> None:
+        reg = ClipRegistry()
+        fn_a = lambda d: d[0]
+        fn_b = lambda d: d[-1]
+        reg.register_compose("a", fn_a)
+        reg.register_compose("b", fn_b)
+        name, fn = reg.get_default_compose()
+        assert name == "a"
+        assert fn is fn_a
