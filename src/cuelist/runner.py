@@ -100,6 +100,15 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self._paused = False
         self._start_loop(self._elapsed)
 
+    def swap(self, clip: Clip[Ctx, Target, Delta]) -> None:
+        """Atomically replace the clip used by the running playback loop.
+
+        The next frame will pick up the new clip.  Safe to call from any
+        thread — Python's GIL guarantees the attribute write is atomic
+        with respect to the loop thread's read.
+        """
+        self._clip = clip
+
     def stop(self) -> None:
         self._stop_event.set()
         if self._paused:
@@ -154,21 +163,26 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         start_time = time.monotonic() - start_at
         self._thread = threading.Thread(
             target=self._loop,
-            args=(self._clip, start_time, frame_duration),
+            args=(start_time, frame_duration),
             daemon=True,
         )
         self._thread.start()
 
     def _loop(
         self,
-        clip: Clip[Ctx, Target, Delta],
         start_time: float,
         frame_duration: float,
     ) -> None:
         frame_count = 0
+        clip = self._clip  # initial snapshot
         with asyncio.Runner() as async_runner:
             try:
                 while not self._stop_event.is_set():
+                    # Re-read each frame so swap() takes effect on the next frame
+                    clip = self._clip
+                    if clip is None:
+                        break
+
                     show_time = time.monotonic() - start_time
 
                     if clip.duration is not None and show_time > clip.duration:
@@ -198,7 +212,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     if self._stop_event.wait(timeout=delay):
                         break
             finally:
-                clip_finished = clip.duration is not None and self._elapsed >= clip.duration
+                clip_finished = clip is not None and clip.duration is not None and self._elapsed >= clip.duration
                 if not self._paused or clip_finished:
                     self._paused = False
                     self._done_event.set()
