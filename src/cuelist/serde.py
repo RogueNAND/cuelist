@@ -212,6 +212,8 @@ def deserialize_timeline(
                     meta=meta if meta else None,
                 )
                 timeline.add(position, wrapped)
+            except KeyError as e:
+                log.warning("Skipping nested timeline '%s' at position %s: %s", tl_name, position, e)
             except Exception:
                 log.exception("Failed to load nested timeline '%s'", tl_name)
             continue
@@ -234,6 +236,8 @@ def deserialize_timeline(
                     meta=meta if meta else None,
                 )
                 timeline.add(position, wrapped)
+            except KeyError as e:
+                log.warning("Skipping clip '%s' at position %s: %s", clip_type, position, e)
             except Exception:
                 log.exception("Failed to create clip '%s' at position %s", clip_type, position)
 

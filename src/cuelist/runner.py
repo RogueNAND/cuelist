@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Generic, TypeVar
 
 from .clip import Clip, Ctx, Delta, Target
+
+log = logging.getLogger(__name__)
 
 Output = TypeVar("Output")
 
@@ -173,14 +176,17 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
 
                     self._elapsed = show_time
 
-                    result = clip.render(show_time, self.ctx)
-                    if inspect.isawaitable(result):
-                        deltas = async_runner.run(result)
-                    else:
-                        deltas = result
-                    output = self._apply(deltas)
-                    if self.output_fn is not None:
-                        self.output_fn(output)
+                    try:
+                        result = clip.render(show_time, self.ctx)
+                        if inspect.isawaitable(result):
+                            deltas = async_runner.run(result)
+                        else:
+                            deltas = result
+                        output = self._apply(deltas)
+                        if self.output_fn is not None:
+                            self.output_fn(output)
+                    except Exception:
+                        log.exception("Error rendering frame at %.3fs", show_time)
 
                     if clip.duration is not None and show_time >= clip.duration:
                         break
