@@ -55,7 +55,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         """Current playback state: 'stopped', 'playing', or 'paused'."""
         if self._paused:
             return "paused"
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return "playing"
         return "stopped"
 
