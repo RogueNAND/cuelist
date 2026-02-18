@@ -16,7 +16,11 @@ def _label(name: str) -> str:
 
 
 def _is_color_name(name: str) -> bool:
-    return name == "color" or name.endswith("_color") or name.endswith("_colour")
+    return (
+        name == "color"
+        or name.startswith("color_") or name.startswith("colour_")
+        or name.endswith("_color") or name.endswith("_colour")
+    )
 
 
 def _is_scene_name(name: str) -> bool:
@@ -85,6 +89,15 @@ def generate_schema(fn: Callable, overrides: dict | None = None) -> dict:
         # Apply overrides (merged on top of inferred base)
         if name in overrides:
             field.update(overrides[name])
+
+        # Ensure color fields always have a usable default
+        if field.get("type") == "color" and field.get("default") is None:
+            field["default"] = [1, 1, 1]
+
+        # Clean up tuple-specific keys that leak when overrides change the type
+        if field.get("type") != "tuple":
+            field.pop("nullable", None)
+            field.pop("items", None)
 
         params[name] = field
 
