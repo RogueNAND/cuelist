@@ -82,9 +82,19 @@ class ClipRegistry:
         """
         self._sets[key] = mapping
 
-    def list_sets(self) -> dict[str, list[str]]:
-        """Return ``{key: [item_names...]}`` for all registered set collections."""
-        return {key: list(mapping.keys()) for key, mapping in self._sets.items()}
+    def list_sets(self) -> dict[str, list[dict[str, str]]]:
+        """Return ``{key: [{name, group?}, ...]}`` for all registered set collections."""
+        result: dict[str, list[dict[str, str]]] = {}
+        for key, mapping in self._sets.items():
+            items: list[dict[str, str]] = []
+            for name, obj in mapping.items():
+                item: dict[str, str] = {"name": name}
+                group = getattr(obj, "group", None)
+                if group is not None:
+                    item["group"] = group
+                items.append(item)
+            result[key] = items
+        return result
 
     def get_set(self, key: str) -> dict[str, Any]:
         """Retrieve a set collection mapping by key."""
