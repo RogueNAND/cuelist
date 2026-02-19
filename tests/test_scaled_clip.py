@@ -254,8 +254,8 @@ class TestSerdeNestedTimeline:
         assert mc.inner.amount == 0.8
         assert isinstance(mc.inner.inner, Timeline)
 
-    def test_deserialize_no_fade_no_scaled_clip(self):
-        """Without fade/amount, inner is the sub-timeline directly (no ScaledClip)."""
+    def test_deserialize_no_fade_still_creates_scaled_clip(self):
+        """Even without fade/amount, inner is ScaledClip (for duration clamping)."""
         reg = make_registry()
         sub_data = {
             "$schema": "cuelist-timeline-v1",
@@ -275,8 +275,12 @@ class TestSerdeNestedTimeline:
 
         _, mc = tl.events[0]
         assert isinstance(mc, MetadataClip)
-        # No ScaledClip wrapper when defaults
-        assert isinstance(mc.inner, Timeline)
+        # Always wrapped in ScaledClip for duration clamping
+        assert isinstance(mc.inner, ScaledClip)
+        assert mc.inner.fade_in == 0
+        assert mc.inner.fade_out == 0
+        assert mc.inner.amount == 1.0
+        assert isinstance(mc.inner.inner, Timeline)
 
     def test_deserialize_uses_registry_scale_fn(self):
         """ScaledClip gets the registry's scale_fn when present."""
@@ -544,7 +548,7 @@ class TestNestedBPMClip:
         assert result == {"ch": 5.0}
 
     def test_serde_wraps_bpm_nested(self):
-        """Deserialization wraps nested BPMTimeline in NestedBPMClip."""
+        """Deserialization wraps nested BPMTimeline in NestedBPMClip under ScaledClip."""
         reg = make_registry()
         sub_data = {
             "$schema": "cuelist-timeline-v1",
@@ -568,9 +572,10 @@ class TestNestedBPMClip:
 
         _, mc = tl.events[0]
         assert isinstance(mc, MetadataClip)
-        # Inner should be NestedBPMClip (not bare BPMTimeline)
-        assert isinstance(mc.inner, NestedBPMClip)
-        assert isinstance(mc.inner.inner, BPMTimeline)
+        # Always wrapped in ScaledClip, with NestedBPMClip inside
+        assert isinstance(mc.inner, ScaledClip)
+        assert isinstance(mc.inner.inner, NestedBPMClip)
+        assert isinstance(mc.inner.inner.inner, BPMTimeline)
 
     def test_serde_wraps_bpm_with_scaled(self):
         """Deserialization: NestedBPMClip goes under ScaledClip."""
@@ -634,3 +639,130 @@ class TestNestedBPMClip:
         # Outer: start + end for MetadataClip
         # Inner: start + end for the clip
         assert len(points) == 4
+
+
+# -- Duration override tests -------------------------------------------------
+
+class TestDurationOverride:
+
+    def test_duration_override_returns_override(self):
+        """ScaledClip with duration_override returns override, not inner duration."""
+        inner = clip(32.0, lambda t, ctx: {"ch": t})
+        sc = ScaledClip(inner, duration_override=16.0)
+        assert sc.duration == 16.0
+
+    def test_duration_override_none_delegates(self):
+        """ScaledClip without duration_override delegates to inner."""
+        inner = clip(32.0, lambda t, ctx: {"ch": t})
+        sc = ScaledClip(inner)
+        assert sc.duration == 32.0
+
+    def test_fade_uses_overridden_duration(self):
+        """Fade envelope uses the overridden duration, not the inner duration."""
+        calls = []
+
+        def mock_scale(result, factor):
+            calls.append(factor)
+            return result
+
+        inner = clip(32.0, lambda t, ctx: {"ch": 1.0})
+        sc = ScaledClip(inner, fade_out=4.0, scale_fn=mock_scale, duration_override=16.0)
+
+        # At t=14: fade_out with duration=16, fade_out=4 → starts at t=12
+        # factor = (16-14)/4 = 0.5
+        sc.render(14.0, None)
+        assert calls[-1] == pytest.approx(0.5)
+
+        # At t=16: fade_out → factor = 0.0 → returns {}
+        result = sc.render(16.0, None)
+        assert result == {}
+
+    def test_parent_stops_rendering_at_clamped_duration(self):
+        """Parent timeline stops rendering sub-clip at the clamped duration."""
+        inner_tl = Timeline(compose_fn=sum_compose)
+        inner_tl.add(0.0, clip(32.0, lambda t, ctx: {"ch": 1.0}))
+
+        sc = ScaledClip(inner_tl, duration_override=8.0)
+        parent = Timeline(compose_fn=sum_compose)
+        parent.add(0.0, sc)
+
+        # At t=4 (within clamped duration), renders
+        result = parent.render(4.0, None)
+        assert result == {"ch": 1.0}
+
+        # At t=9 (past clamped duration of 8), not rendered
+        result = parent.render(9.0, None)
+        assert result == {}
+
+    def test_serde_duration_override_from_meta(self):
+        """Deserialization reads meta.durationBeats as duration_override."""
+        reg = make_registry()
+        sub_data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [
+                {"position": 0, "clip": {"type": "test_clip", "params": {"duration": 32}}},
+            ],
+        }
+        load_fn = make_load_fn({"sub": sub_data})
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [
+                {
+                    "position": 0,
+                    "timeline": {"name": "sub"},
+                    "meta": {"durationBeats": 16},
+                },
+            ],
+        }
+        tl = deserialize_timeline(data, reg, load_fn=load_fn)
+
+        _, mc = tl.events[0]
+        assert isinstance(mc.inner, ScaledClip)
+        assert mc.inner.duration_override == 16
+        assert mc.inner.duration == 16
+
+    def test_serde_no_meta_duration_falls_back(self):
+        """Without meta.durationBeats, ScaledClip uses inner duration."""
+        reg = make_registry()
+        sub_data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [
+                {"position": 0, "clip": {"type": "test_clip", "params": {"duration": 32}}},
+            ],
+        }
+        load_fn = make_load_fn({"sub": sub_data})
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [
+                {"position": 0, "timeline": {"name": "sub"}},
+            ],
+        }
+        tl = deserialize_timeline(data, reg, load_fn=load_fn)
+
+        _, mc = tl.events[0]
+        assert isinstance(mc.inner, ScaledClip)
+        assert mc.inner.duration_override is None
+        # Falls back to inner timeline duration
+        assert mc.inner.duration == 32
+
+    def test_amount_with_duration_override(self):
+        """Amount scaling works with clamped duration."""
+        calls = []
+
+        def mock_scale(result, factor):
+            calls.append(factor)
+            return {k: v * factor for k, v in result.items()}
+
+        inner = clip(32.0, lambda t, ctx: {"ch": 10.0})
+        sc = ScaledClip(inner, amount=0.5, scale_fn=mock_scale, duration_override=16.0)
+
+        # Mid-clip: factor = 0.5 * 1.0 (no fade) = 0.5
+        result = sc.render(8.0, None)
+        assert calls[-1] == pytest.approx(0.5)
+        assert result == {"ch": 5.0}

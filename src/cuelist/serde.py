@@ -245,14 +245,15 @@ def deserialize_timeline(
                 if isinstance(sub_timeline, BPMTimeline):
                     from .clip import NestedBPMClip
                     sub_timeline = NestedBPMClip(sub_timeline)
-                inner = sub_timeline
-                if tl_fade_in or tl_fade_out or tl_amount != 1.0:
-                    from .clip import ScaledClip
-                    inner = ScaledClip(
-                        sub_timeline,
-                        fade_in=tl_fade_in, fade_out=tl_fade_out, amount=tl_amount,
-                        scale_fn=registry.get_scale(),
-                    )
+                # Always wrap in ScaledClip for duration clamping, fade, and amount
+                from .clip import ScaledClip
+                duration_beats = meta.get("durationBeats")
+                inner = ScaledClip(
+                    sub_timeline,
+                    fade_in=tl_fade_in, fade_out=tl_fade_out, amount=tl_amount,
+                    scale_fn=registry.get_scale(),
+                    duration_override=duration_beats,
+                )
                 wrapped = MetadataClip(
                     inner,
                     timeline_name=tl_name,

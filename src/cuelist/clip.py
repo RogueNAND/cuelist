@@ -216,15 +216,18 @@ class ScaledClip:
     The scale_fn is domain-specific (e.g., scale_deltas for lighting).
     """
 
-    def __init__(self, inner, *, fade_in=0, fade_out=0, amount=1.0, scale_fn=None):
+    def __init__(self, inner, *, fade_in=0, fade_out=0, amount=1.0, scale_fn=None, duration_override=None):
         self.inner = inner
         self.fade_in = fade_in
         self.fade_out = fade_out
         self.amount = amount
         self.scale_fn = scale_fn
+        self.duration_override = duration_override
 
     @property
     def duration(self):
+        if self.duration_override is not None:
+            return self.duration_override
         return self.inner.duration
 
     def render(self, t, ctx):
