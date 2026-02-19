@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from cuelist.clip import ScaledClip, Timeline, _fade_envelope, clip
+from cuelist.clip import NestedBPMClip, ScaledClip, Timeline, _fade_envelope, clip
 from cuelist.registry import ClipRegistry
 from cuelist.serde import MetadataClip, deserialize_timeline, serialize_timeline
+from cuelist.tempo import BPMTimeline, TempoMap
 from cuelist.verify import collect_verify_points
 
 from conftest import sum_compose
@@ -444,3 +445,192 @@ class TestRecursiveVerify:
         # All start points should be at 10.0 (three nested levels all starting at 0 offset)
         starts = [p for p in points if p.edge == "start"]
         assert all(p.time_seconds == pytest.approx(10.0) for p in starts)
+
+
+# -- NestedBPMClip tests -----------------------------------------------------
+
+class TestNestedBPMClip:
+
+    def test_duration_returns_beats(self):
+        """NestedBPMClip.duration returns max end-beat, not seconds."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(4.0, lambda t, ctx: {"ch": t}))  # 4 beats
+        inner.add(4.0, clip(4.0, lambda t, ctx: {"ch": t}))  # ends at beat 8
+
+        nested = NestedBPMClip(inner)
+        # Duration should be 8 beats, NOT 4 seconds (which BPMTimeline.duration would return)
+        assert nested.duration == 8.0
+        # Verify BPMTimeline.duration would give seconds (the bug we're fixing)
+        assert inner.duration == pytest.approx(4.0)  # 8 beats at 120 BPM = 4 seconds
+
+    def test_duration_empty(self):
+        """Empty nested timeline has duration 0."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        assert NestedBPMClip(inner).duration == 0.0
+
+    def test_duration_none_propagates(self):
+        """None duration from infinite clip passes through."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(None, lambda t, ctx: {}))
+        assert NestedBPMClip(inner).duration is None
+
+    def test_render_receives_beats(self):
+        """NestedBPMClip.render passes t in beats directly to _render_at."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        # Clip at beat 0, duration 4 beats. render returns {"ch": t} where t is local beat offset
+        inner.add(0.0, clip(4.0, lambda t, ctx: {"ch": t}))
+
+        nested = NestedBPMClip(inner)
+        # At beat 2.0, the clip should render with local_t = 2.0
+        result = nested.render(2.0, None)
+        assert result == {"ch": 2.0}
+
+    def test_render_without_wrapper_is_wrong(self):
+        """Demonstrates the bug: BPMTimeline.render interprets beats as seconds."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(4.0, lambda t, ctx: {"ch": t}))
+
+        # BPMTimeline.render(2.0) treats 2.0 as seconds, converts to 4.0 beats
+        # With clip at beat 0 duration 4, local_t = 4.0 which is at the boundary
+        # This is the double-conversion bug
+        result_buggy = inner.render(2.0, None)
+        assert result_buggy == {"ch": 4.0}  # Wrong! Should be 2.0
+
+        # NestedBPMClip.render(2.0) passes 2.0 beats directly
+        nested = NestedBPMClip(inner)
+        result_fixed = nested.render(2.0, None)
+        assert result_fixed == {"ch": 2.0}  # Correct
+
+    def test_nested_bpm_in_parent_bpm(self):
+        """Full integration: BPMTimeline parent with nested BPMTimeline child."""
+        # Inner: clip at beat 2, duration 2 beats
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(2.0, clip(2.0, lambda t, ctx: {"ch": t + 100}))
+
+        nested = NestedBPMClip(inner)
+
+        # Parent: nested clip at beat 4, should span beats 4-8 (inner is 4 beats: 0+4=4 or 2+2=4)
+        parent = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        parent.add(4.0, nested)
+
+        # At 3 seconds = 6 beats at 120 BPM. Inner local_t = 6-4 = 2 beats.
+        # Inner clip at beat 2, local_t = 2-2 = 0. Renders {"ch": 100}
+        result = parent.render(3.0, None)
+        assert result == {"ch": 100}
+
+        # At 3.5 seconds = 7 beats. Inner local_t = 7-4 = 3 beats.
+        # Inner clip at beat 2, local_t = 3-2 = 1. Renders {"ch": 101}
+        result = parent.render(3.5, None)
+        assert result == {"ch": 101}
+
+    def test_with_scaled_clip(self):
+        """NestedBPMClip wrapped in ScaledClip with fade works in beat-space."""
+        calls = []
+
+        def mock_scale(result, factor):
+            calls.append(factor)
+            return {k: v * factor for k, v in result.items()}
+
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(8.0, lambda t, ctx: {"ch": 10.0}))
+
+        nested = NestedBPMClip(inner)
+        # 8 beats total, 4 beat fade_in
+        scaled = ScaledClip(nested, fade_in=4.0, amount=1.0, scale_fn=mock_scale)
+
+        # At beat 2 (within 4-beat fade_in): factor = 2/4 = 0.5
+        result = scaled.render(2.0, None)
+        assert calls[-1] == pytest.approx(0.5)
+        assert result == {"ch": 5.0}
+
+    def test_serde_wraps_bpm_nested(self):
+        """Deserialization wraps nested BPMTimeline in NestedBPMClip."""
+        reg = make_registry()
+        sub_data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [
+                {"position": 0, "clip": {"type": "test_clip", "params": {"duration": 4}}},
+            ],
+        }
+        load_fn = make_load_fn({"sub": sub_data})
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [
+                {"position": 0, "timeline": {"name": "sub"}},
+            ],
+        }
+        tl = deserialize_timeline(data, reg, load_fn=load_fn)
+
+        _, mc = tl.events[0]
+        assert isinstance(mc, MetadataClip)
+        # Inner should be NestedBPMClip (not bare BPMTimeline)
+        assert isinstance(mc.inner, NestedBPMClip)
+        assert isinstance(mc.inner.inner, BPMTimeline)
+
+    def test_serde_wraps_bpm_with_scaled(self):
+        """Deserialization: NestedBPMClip goes under ScaledClip."""
+        reg = make_registry()
+        sub_data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [],
+        }
+        load_fn = make_load_fn({"sub": sub_data})
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "BPMTimeline",
+            "tempo": {"bpm": 120},
+            "events": [
+                {"position": 0, "timeline": {"name": "sub", "fade_in": 2, "amount": 0.8}},
+            ],
+        }
+        tl = deserialize_timeline(data, reg, load_fn=load_fn)
+
+        _, mc = tl.events[0]
+        assert isinstance(mc.inner, ScaledClip)
+        assert isinstance(mc.inner.inner, NestedBPMClip)
+        assert isinstance(mc.inner.inner.inner, BPMTimeline)
+
+    def test_verify_recurses_through_nested_bpm(self):
+        """Verify collects points from nested BPMTimeline through NestedBPMClip."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(4.0, lambda t, ctx: {"ch": t}))
+        inner.add(4.0, clip(4.0, lambda t, ctx: {"ch": t}))
+
+        nested = NestedBPMClip(inner)
+        outer = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        # Place at beat 10 = 5.0 seconds at 120 BPM
+        outer.add(10.0, MetadataClip(nested, timeline_name="sub"))
+
+        points = collect_verify_points(outer)
+
+        # Outer: MetadataClip -> start + end
+        # Inner: 2 clips -> 2 start + 2 end, offset by 5.0 seconds
+        assert len(points) == 6
+
+        starts = [p for p in points if p.edge == "start"]
+        start_times = sorted(p.time_seconds for p in starts)
+        # Outer starts at 5.0s (beat 10), inner clip[0] at 5.0s (beat 0+10=10), inner clip[1] at 7.0s (beat 4+10=14)
+        assert start_times == pytest.approx([5.0, 5.0, 7.0])
+
+    def test_verify_with_scaled_and_nested_bpm(self):
+        """Verify recurses through ScaledClip → NestedBPMClip → BPMTimeline."""
+        inner = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        inner.add(0.0, clip(2.0, lambda t, ctx: {"ch": t}))
+
+        nested = NestedBPMClip(inner)
+        scaled = ScaledClip(nested, fade_in=1.0, amount=0.8)
+        outer = BPMTimeline(tempo_map=TempoMap(bpm=120.0), compose_fn=sum_compose)
+        outer.add(4.0, MetadataClip(scaled, timeline_name="sub"))
+
+        points = collect_verify_points(outer)
+        # Outer: start + end for MetadataClip
+        # Inner: start + end for the clip
+        assert len(points) == 4

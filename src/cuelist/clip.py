@@ -179,6 +179,36 @@ def _fade_envelope(t, duration, fade_in, fade_out):
     return max(0.0, min(1.0, f))
 
 
+class NestedBPMClip:
+    """Wraps a BPMTimeline for nesting inside a parent BPMTimeline.
+
+    A parent BPMTimeline passes t in beats (via _render_at). A nested
+    BPMTimeline's render() would incorrectly convert beats→beats again.
+    This wrapper bypasses that conversion by calling _render_at() directly.
+    Duration is returned in beats for correct parent scheduling.
+    """
+
+    def __init__(self, inner):
+        self.inner = inner  # BPMTimeline
+
+    @property
+    def duration(self):
+        if not self.inner.events:
+            return 0.0
+        max_end = None
+        for start_beat, c in self.inner.events:
+            dur = c.duration
+            if dur is None:
+                return None
+            end_beat = start_beat + dur
+            if max_end is None or end_beat > max_end:
+                max_end = end_beat
+        return max_end
+
+    def render(self, t, ctx):
+        return self.inner._render_at(t, ctx)
+
+
 class ScaledClip:
     """Wraps a clip, scaling its render output by fade envelope * amount.
 

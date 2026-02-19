@@ -1,6 +1,6 @@
 """Generic timeline library."""
 
-from .clip import BaseTimeline, Clip, ComposeFn, ScaledClip, Timeline, clip, compose_last, compose_sum
+from .clip import BaseTimeline, Clip, ComposeFn, NestedBPMClip, ScaledClip, Timeline, clip, compose_last, compose_sum
 from .clip import _fade_envelope as fade_envelope
 from .registry import ClipRegistry, registry
 from .schema import clip_schema
@@ -25,6 +25,7 @@ __all__ = [
     "fade_envelope",
     "evaluate_set",
     "MetadataClip",
+    "NestedBPMClip",
     "registry",
     "Runner",
     "ScaledClip",

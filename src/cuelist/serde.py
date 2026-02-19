@@ -241,6 +241,10 @@ def deserialize_timeline(
             try:
                 sub_data = load_fn(tl_name)
                 sub_timeline = deserialize_timeline(sub_data, registry, load_fn=load_fn)
+                # Wrap BPMTimeline to fix beat-space rendering when nested
+                if isinstance(sub_timeline, BPMTimeline):
+                    from .clip import NestedBPMClip
+                    sub_timeline = NestedBPMClip(sub_timeline)
                 inner = sub_timeline
                 if tl_fade_in or tl_fade_out or tl_amount != 1.0:
                     from .clip import ScaledClip

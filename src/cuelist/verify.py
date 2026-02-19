@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .clip import ScaledClip, Timeline
+from .clip import NestedBPMClip, ScaledClip, Timeline
 from .serde import MetadataClip
 from .tempo import BPMTimeline
 
@@ -71,6 +71,8 @@ def collect_verify_points(timeline: Timeline | BPMTimeline, _offset: float = 0.0
         if isinstance(inner, MetadataClip):
             inner = inner.inner
         if isinstance(inner, ScaledClip):
+            inner = inner.inner
+        if isinstance(inner, NestedBPMClip):
             inner = inner.inner
         if isinstance(inner, (Timeline, BPMTimeline)):
             sub_points = collect_verify_points(inner, _offset=start_seconds)
