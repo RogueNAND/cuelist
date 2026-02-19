@@ -459,3 +459,88 @@ class TestDeserializeComposeFn:
         }
         tl = deserialize_timeline(data, reg)
         assert tl.compose_fn is my_compose
+
+
+# -- list-to-tuple conversion -------------------------------------------------
+
+class TestListToTupleConversion:
+
+    def test_color_list_becomes_tuple(self):
+        """JSON color arrays are converted to tuples during deserialization."""
+        captured = {}
+
+        def spy_factory(duration=4, color=(1, 1, 1), level=1.0):
+            captured["color"] = color
+            return DummyClip(duration)
+
+        reg = ClipRegistry()
+        reg.register("spy_clip", spy_factory)
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [{
+                "position": 0,
+                "clip": {
+                    "type": "spy_clip",
+                    "params": {"duration": 4, "color": [1, 0, 0]},
+                },
+            }],
+        }
+        deserialize_timeline(data, reg)
+        assert isinstance(captured["color"], tuple)
+        assert captured["color"] == (1, 0, 0)
+
+    def test_variable_resolved_color_becomes_tuple(self):
+        """Variable-resolved color lists are also converted to tuples."""
+        captured = {}
+
+        def spy_factory(duration=4, color=(1, 1, 1), level=1.0):
+            captured["color"] = color
+            return DummyClip(duration)
+
+        reg = ClipRegistry()
+        reg.register("spy_clip", spy_factory)
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "variables": {"red": {"type": "color", "value": [1, 0, 0]}},
+            "events": [{
+                "position": 0,
+                "clip": {
+                    "type": "spy_clip",
+                    "params": {"duration": 4, "color": {"$var": "red"}},
+                },
+            }],
+        }
+        deserialize_timeline(data, reg)
+        assert isinstance(captured["color"], tuple)
+        assert captured["color"] == (1, 0, 0)
+
+    def test_non_list_params_unchanged(self):
+        """Non-list params (numbers, strings) pass through unchanged."""
+        captured = {}
+
+        def spy_factory(duration=4, color=(1, 1, 1), level=1.0):
+            captured["level"] = level
+            captured["duration"] = duration
+            return DummyClip(duration)
+
+        reg = ClipRegistry()
+        reg.register("spy_clip", spy_factory)
+
+        data = {
+            "$schema": "cuelist-timeline-v1",
+            "type": "Timeline",
+            "events": [{
+                "position": 0,
+                "clip": {
+                    "type": "spy_clip",
+                    "params": {"duration": 8, "level": 0.5},
+                },
+            }],
+        }
+        deserialize_timeline(data, reg)
+        assert captured["duration"] == 8
+        assert captured["level"] == 0.5

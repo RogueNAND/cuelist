@@ -106,7 +106,8 @@ def _deserialize_params(
         elif isinstance(value, str) and value in resource_names:
             result[key] = registry.get_resource(value)
         else:
-            result[key] = value
+            # JSON arrays → tuples (JSON has no tuple type)
+            result[key] = tuple(value) if isinstance(value, list) else value
     return result
 
 
