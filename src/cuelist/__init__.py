@@ -7,6 +7,7 @@ from .runner import Runner
 from .serde import MetadataClip, deserialize_timeline, serialize_timeline
 from .seteval import evaluate_set
 from .tempo import BPMTimeline, TempoMap
+from .verify import VerifyPoint, collect_verify_points
 
 __all__ = [
     "BaseTimeline",
@@ -15,6 +16,7 @@ __all__ = [
     "clip",
     "clip_schema",
     "ClipRegistry",
+    "collect_verify_points",
     "ComposeFn",
     "compose_last",
     "compose_sum",
@@ -26,6 +28,7 @@ __all__ = [
     "serialize_timeline",
     "TempoMap",
     "Timeline",
+    "VerifyPoint",
 ]
 
 __version__ = "0.3.0"
