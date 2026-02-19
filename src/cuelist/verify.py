@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .clip import Timeline
+from .clip import ScaledClip, Timeline
 from .serde import MetadataClip
 from .tempo import BPMTimeline
 
@@ -26,10 +26,11 @@ def _build_label(index: int, clip) -> str:
     return f"clip[{index}]"
 
 
-def collect_verify_points(timeline: Timeline | BPMTimeline) -> list[VerifyPoint]:
+def collect_verify_points(timeline: Timeline | BPMTimeline, _offset: float = 0.0) -> list[VerifyPoint]:
     """Collect start/end verification points from a timeline's events.
 
     Returns points sorted by (time_seconds, edge) where start sorts before end.
+    Recurses into nested timelines, offsetting their points by the parent position.
     """
     is_bpm = isinstance(timeline, BPMTimeline)
     points: list[tuple[float, int, VerifyPoint]] = []
@@ -38,9 +39,9 @@ def collect_verify_points(timeline: Timeline | BPMTimeline) -> list[VerifyPoint]
         label = _build_label(i, clip)
 
         if is_bpm:
-            start_seconds = timeline.tempo_map.time(position)
+            start_seconds = timeline.tempo_map.time(position) + _offset
         else:
-            start_seconds = position
+            start_seconds = position + _offset
 
         points.append((start_seconds, 0, VerifyPoint(
             time_seconds=start_seconds,
@@ -51,9 +52,9 @@ def collect_verify_points(timeline: Timeline | BPMTimeline) -> list[VerifyPoint]
 
         if clip.duration is not None and clip.duration > 0:
             if is_bpm:
-                end_seconds = timeline.tempo_map.time(position + clip.duration)
+                end_seconds = timeline.tempo_map.time(position + clip.duration) + _offset
             else:
-                end_seconds = position + clip.duration
+                end_seconds = position + clip.duration + _offset
 
             # Nudge 1ms inward, but not below start
             end_seconds = max(start_seconds, end_seconds - 0.001)
@@ -64,6 +65,17 @@ def collect_verify_points(timeline: Timeline | BPMTimeline) -> list[VerifyPoint]
                 event_index=i,
                 edge="end",
             )))
+
+        # Recurse into nested timelines
+        inner = clip
+        if isinstance(inner, MetadataClip):
+            inner = inner.inner
+        if isinstance(inner, ScaledClip):
+            inner = inner.inner
+        if isinstance(inner, (Timeline, BPMTimeline)):
+            sub_points = collect_verify_points(inner, _offset=start_seconds)
+            for sp in sub_points:
+                points.append((sp.time_seconds, 0 if sp.edge == "start" else 1, sp))
 
     points.sort(key=lambda p: (p[0], p[1]))
     return [vp for _, _, vp in points]

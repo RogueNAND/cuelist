@@ -30,6 +30,9 @@ class MetadataClip:
         meta: dict | None = None,
         timeline_name: str | None = None,
         template_id: str | None = None,
+        tl_fade_in: float = 0,
+        tl_fade_out: float = 0,
+        tl_amount: float = 1.0,
     ) -> None:
         self.inner = inner
         self.clip_type = clip_type
@@ -37,6 +40,9 @@ class MetadataClip:
         self.meta = meta or {}
         self.timeline_name = timeline_name
         self.template_id = template_id
+        self.tl_fade_in = tl_fade_in
+        self.tl_fade_out = tl_fade_out
+        self.tl_amount = tl_amount
 
     @property
     def duration(self):
@@ -148,7 +154,14 @@ def serialize_timeline(timeline: Timeline | BPMTimeline, registry: ClipRegistry)
         if isinstance(clip_obj, MetadataClip):
             meta = clip_obj.meta
             if clip_obj.timeline_name is not None:
-                event["timeline"] = {"name": clip_obj.timeline_name}
+                tl_data = {"name": clip_obj.timeline_name}
+                if clip_obj.tl_fade_in:
+                    tl_data["fade_in"] = clip_obj.tl_fade_in
+                if clip_obj.tl_fade_out:
+                    tl_data["fade_out"] = clip_obj.tl_fade_out
+                if clip_obj.tl_amount != 1.0:
+                    tl_data["amount"] = clip_obj.tl_amount
+                event["timeline"] = tl_data
             elif clip_obj.clip_type is not None:
                 event["clip"] = {
                     "type": clip_obj.clip_type,
@@ -216,6 +229,9 @@ def deserialize_timeline(
         if "timeline" in event:
             tl_ref = event["timeline"]
             tl_name = tl_ref.get("name")
+            tl_fade_in = tl_ref.get("fade_in", 0)
+            tl_fade_out = tl_ref.get("fade_out", 0)
+            tl_amount = tl_ref.get("amount", 1.0)
             if not tl_name:
                 log.warning("Skipping timeline event with no name at position %s", position)
                 continue
@@ -225,10 +241,21 @@ def deserialize_timeline(
             try:
                 sub_data = load_fn(tl_name)
                 sub_timeline = deserialize_timeline(sub_data, registry, load_fn=load_fn)
+                inner = sub_timeline
+                if tl_fade_in or tl_fade_out or tl_amount != 1.0:
+                    from .clip import ScaledClip
+                    inner = ScaledClip(
+                        sub_timeline,
+                        fade_in=tl_fade_in, fade_out=tl_fade_out, amount=tl_amount,
+                        scale_fn=registry.get_scale(),
+                    )
                 wrapped = MetadataClip(
-                    sub_timeline,
+                    inner,
                     timeline_name=tl_name,
                     meta=meta if meta else None,
+                    tl_fade_in=tl_fade_in,
+                    tl_fade_out=tl_fade_out,
+                    tl_amount=tl_amount,
                 )
                 timeline.add(position, wrapped)
             except KeyError as e:

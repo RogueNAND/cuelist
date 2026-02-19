@@ -19,6 +19,7 @@ class ClipRegistry:
         self._default_compose_name: str | None = None
         self._default_compose_fn: Callable | None = None
         self._sets: dict[str, dict[str, Any]] = {}
+        self._scale_fn: Callable | None = None
 
     def register(self, name_or_fn=None, factory_fn=None, *, schema=None):
         """Register a clip factory, auto-generating schema if not provided.
@@ -151,6 +152,14 @@ class ClipRegistry:
                 items.append(item)
             result[key] = items
         return result
+
+    def register_scale(self, fn):
+        """Register a domain-specific delta scale function: (dict, float) -> dict."""
+        self._scale_fn = fn
+
+    def get_scale(self):
+        """Return the registered scale function, or None."""
+        return self._scale_fn
 
     def get_set(self, key: str) -> dict[str, Any]:
         """Retrieve a set collection mapping by key."""

@@ -165,3 +165,45 @@ class Timeline(BaseTimeline):
 
     def render(self, t: float, ctx) -> dict:
         return self._render_at(t, ctx)
+
+
+def _fade_envelope(t, duration, fade_in, fade_out):
+    """Linear fade envelope returning 0.0-1.0."""
+    if duration is None or duration <= 0:
+        return 1.0
+    f = 1.0
+    if fade_in > 0 and t < fade_in:
+        f = min(f, t / fade_in)
+    if fade_out > 0 and t > duration - fade_out:
+        f = min(f, (duration - t) / fade_out)
+    return max(0.0, min(1.0, f))
+
+
+class ScaledClip:
+    """Wraps a clip, scaling its render output by fade envelope * amount.
+
+    Used to apply fade in/out and wet/dry amount to nested timeline references.
+    The scale_fn is domain-specific (e.g., scale_deltas for lighting).
+    """
+
+    def __init__(self, inner, *, fade_in=0, fade_out=0, amount=1.0, scale_fn=None):
+        self.inner = inner
+        self.fade_in = fade_in
+        self.fade_out = fade_out
+        self.amount = amount
+        self.scale_fn = scale_fn
+
+    @property
+    def duration(self):
+        return self.inner.duration
+
+    def render(self, t, ctx):
+        result = self.inner.render(t, ctx)
+        factor = self.amount * _fade_envelope(t, self.duration, self.fade_in, self.fade_out)
+        if factor >= 1.0:
+            return result
+        if factor <= 0.0:
+            return {}
+        if self.scale_fn:
+            return self.scale_fn(result, factor)
+        return result
