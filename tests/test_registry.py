@@ -1,4 +1,6 @@
-"""Tests for ClipRegistry set collections."""
+"""Tests for ClipRegistry: set collections, decorator registration, module scanning."""
+
+import types
 
 from cuelist.registry import ClipRegistry
 
@@ -99,3 +101,145 @@ class TestDefaultCompose:
         name, fn = reg.get_default_compose()
         assert name == "a"
         assert fn is fn_a
+
+
+class TestRegisterDecorator:
+
+    def test_bare_decorator_registers_by_function_name(self) -> None:
+        reg = ClipRegistry()
+
+        @reg.register
+        def my_factory(duration=4, *, color=(1, 1, 1)):
+            return None
+
+        assert "my_factory" in reg.list_factories()
+
+    def test_bare_decorator_returns_original_function(self) -> None:
+        reg = ClipRegistry()
+
+        @reg.register
+        def my_factory(duration=4):
+            return "hello"
+
+        assert my_factory(4) == "hello"
+
+    def test_direct_call_still_works(self) -> None:
+        reg = ClipRegistry()
+        fn = lambda duration=4: None
+        reg.register("custom_name", fn)
+        assert "custom_name" in reg.list_factories()
+
+    def test_decorator_generates_schema(self) -> None:
+        reg = ClipRegistry()
+
+        @reg.register
+        def my_clip(duration, *, speed=1.0):
+            return None
+
+        schema = reg.get_schema("my_clip")
+        assert schema is not None
+        assert "speed" in schema["params"]
+
+    def test_decorator_with_clip_schema(self) -> None:
+        """@registry.register stacked with @clip_schema picks up overrides."""
+        from cuelist.schema import clip_schema
+
+        reg = ClipRegistry()
+
+        @reg.register
+        @clip_schema({"speed": {"min": 0, "max": 10}})
+        def effect(duration, *, speed=1.0):
+            return None
+
+        schema = reg.get_schema("effect")
+        assert schema["params"]["speed"]["min"] == 0
+        assert schema["params"]["speed"]["max"] == 10
+
+
+class TestRegisterComposeDecorator:
+
+    def test_bare_decorator_registers_by_function_name(self) -> None:
+        reg = ClipRegistry()
+
+        @reg.register_compose
+        def my_compose(deltas):
+            return deltas[0]
+
+        name, fn = reg.get_default_compose()
+        assert name == "my_compose"
+        assert fn is my_compose
+
+    def test_bare_decorator_returns_original_function(self) -> None:
+        reg = ClipRegistry()
+
+        @reg.register_compose
+        def my_compose(deltas):
+            return deltas[0]
+
+        assert callable(my_compose)
+        assert my_compose([42]) == 42
+
+    def test_direct_call_still_works(self) -> None:
+        reg = ClipRegistry()
+        fn = lambda deltas: deltas[0]
+        reg.register_compose("custom", fn)
+        assert reg.get_compose("custom") is fn
+
+
+class TestRegisterSetFromModule:
+
+    def _make_fake_module(self) -> tuple:
+        """Create a fake module with typed objects for testing."""
+
+        class FakeGroup:
+            def __init__(self, group=None):
+                self.group = group
+
+        mod = types.ModuleType("fake_rig")
+        mod.front = FakeGroup("Location")
+        mod.back = FakeGroup("Location")
+        mod.drummer = FakeGroup("Band")
+        mod.not_a_group = "a string"
+        mod._private = FakeGroup("Hidden")
+        return mod, FakeGroup
+
+    def test_scans_module_for_type_instances(self) -> None:
+        mod, FakeGroup = self._make_fake_module()
+        reg = ClipRegistry()
+        reg.register_set_from_module("groups", mod, FakeGroup)
+
+        result = reg.get_set("groups")
+        assert "front" in result
+        assert "back" in result
+        assert "drummer" in result
+        assert "not_a_group" not in result
+        assert "_private" not in result
+
+    def test_list_sets_includes_group_attribute(self) -> None:
+        mod, FakeGroup = self._make_fake_module()
+        reg = ClipRegistry()
+        reg.register_set_from_module("groups", mod, FakeGroup)
+
+        result = reg.list_sets()
+        items = {item["name"]: item for item in result["groups"]}
+        assert items["front"]["group"] == "Location"
+        assert items["drummer"]["group"] == "Band"
+
+    def test_replaces_existing_set(self) -> None:
+        mod, FakeGroup = self._make_fake_module()
+        reg = ClipRegistry()
+        reg.register_set("groups", {"old_item": object()})
+        reg.register_set_from_module("groups", mod, FakeGroup)
+
+        result = reg.get_set("groups")
+        assert "front" in result
+        assert "old_item" not in result
+
+    def test_non_module_finds_nothing(self) -> None:
+        """Passing a non-module object (e.g. a class instance) should produce an empty set."""
+        _, FakeGroup = self._make_fake_module()
+        reg = ClipRegistry()
+        reg.register_set_from_module("groups", object(), FakeGroup)
+
+        result = reg.get_set("groups")
+        assert len(result) == 0
