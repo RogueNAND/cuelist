@@ -92,6 +92,7 @@ def _deserialize_params(
     params: dict,
     registry: ClipRegistry,
     schema: dict | None = None,
+    color_class: type | None = None,
 ) -> dict:
     """Deserialize clip params, resolving resource names and set operations."""
     resource_names = set(registry.list_resources())
@@ -109,6 +110,9 @@ def _deserialize_params(
             except (KeyError, ValueError):
                 log.warning("Failed to evaluate set param %r, passing through", key)
                 result[key] = value
+        elif color_class and field_schema.get("type") == "color" and isinstance(value, list):
+            boost = value[3] if len(value) >= 4 else 0.0
+            result[key] = color_class(value[0], value[1], value[2], boost=boost)
         elif isinstance(value, str) and value in resource_names:
             result[key] = registry.get_resource(value)
         else:
@@ -184,6 +188,7 @@ def deserialize_timeline(
     data: dict,
     registry: ClipRegistry,
     load_fn: Callable[[str], dict] | None = None,
+    color_class: type | None = None,
 ) -> Timeline | BPMTimeline:
     """Reconstruct a Timeline or BPMTimeline from a JSON dict.
 
@@ -240,7 +245,7 @@ def deserialize_timeline(
                 continue
             try:
                 sub_data = load_fn(tl_name)
-                sub_timeline = deserialize_timeline(sub_data, registry, load_fn=load_fn)
+                sub_timeline = deserialize_timeline(sub_data, registry, load_fn=load_fn, color_class=color_class)
                 # Wrap BPMTimeline to fix beat-space rendering when nested
                 if isinstance(sub_timeline, BPMTimeline):
                     from .clip import NestedBPMClip
@@ -294,7 +299,7 @@ def deserialize_timeline(
             try:
                 clip_schema = registry.get_schema(clip_type)
                 var_resolved = _resolve_variables(clip_params, variables)
-                resolved_params = _deserialize_params(var_resolved, registry, schema=clip_schema)
+                resolved_params = _deserialize_params(var_resolved, registry, schema=clip_schema, color_class=color_class)
                 clip_obj = registry.create(clip_type, resolved_params)
                 wrapped = MetadataClip(
                     clip_obj,
