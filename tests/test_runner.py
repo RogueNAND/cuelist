@@ -381,3 +381,84 @@ class TestNegativeStartAt:
         runner.play(clip, start_at=-0.1)
         runner.wait()
         assert len(outputs) >= 1
+
+
+# --- nudge ---
+
+
+class TestNudge:
+    def test_nudge_sets_target_offset(self) -> None:
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.nudge(0.5)
+        assert runner._target_time_offset == 0.5
+        runner.nudge(0.3)
+        assert runner._target_time_offset == 0.8
+
+    def test_nudge_forward_advances_elapsed(self) -> None:
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip)
+        time.sleep(0.05)
+        runner.nudge(0.5)
+        # Wait long enough for interpolation to mostly converge (~500ms)
+        time.sleep(0.5)
+        # Elapsed should include most of the 0.5s offset
+        assert runner.elapsed >= 0.8
+        runner.stop()
+
+    def test_nudge_backward_reduces_elapsed(self) -> None:
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip)
+        time.sleep(0.15)
+        elapsed_before = runner.elapsed
+        runner.nudge(-0.1)
+        time.sleep(0.15)
+        # Elapsed should be less than it would be without the nudge
+        assert runner.elapsed < elapsed_before + 0.2
+        assert runner.elapsed >= 0.0
+        runner.stop()
+
+    def test_nudge_clamps_to_zero(self) -> None:
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip)
+        time.sleep(0.05)
+        runner.nudge(-10.0)
+        time.sleep(0.1)
+        assert runner.elapsed >= 0.0
+        runner.stop()
+
+    def test_play_resets_offset(self) -> None:
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip)
+        time.sleep(0.05)
+        runner.nudge(1.0)
+        runner.stop()
+        assert runner._target_time_offset == 1.0
+        clip2 = InfiniteClip(value=1.0)
+        runner.play(clip2)
+        # play() resets both offsets
+        assert runner._time_offset == 0.0
+        assert runner._target_time_offset == 0.0
+        time.sleep(0.05)
+        assert runner.elapsed < 0.2
+        runner.stop()
+
+    def test_nudge_when_stopped_is_safe(self) -> None:
+        runner = Runner(ctx=None, apply_fn=lambda d: d)
+        runner.nudge(1.0)  # Should not raise
+        assert runner._target_time_offset == 1.0
+
+    def test_nudge_interpolates_gradually(self) -> None:
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip)
+        time.sleep(0.05)
+        runner.nudge(1.0)
+        # After one frame (~25ms), offset should have moved partially, not fully
+        time.sleep(0.03)
+        assert runner._time_offset < 0.5  # should not have jumped to 1.0 yet
+        assert runner._time_offset > 0.0  # but should have started moving
+        runner.stop()

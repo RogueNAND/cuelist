@@ -43,6 +43,8 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     )
     _elapsed: float = field(default=0.0, init=False, repr=False)
     _paused: bool = field(default=False, init=False, repr=False)
+    _time_offset: float = field(default=0.0, init=False, repr=False)
+    _target_time_offset: float = field(default=0.0, init=False, repr=False)
 
     @property
     def is_paused(self) -> bool:
@@ -56,6 +58,14 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def set_elapsed(self, t: float) -> None:
         """Set the current playback position (seconds). For use by external controllers."""
         self._elapsed = t
+
+    def nudge(self, delta: float) -> None:
+        """Shift the playback clock by *delta* seconds (positive = forward).
+
+        The offset interpolates smoothly over several frames to avoid
+        visual snapping in the output.
+        """
+        self._target_time_offset += delta
 
     @property
     def state(self) -> str:
@@ -85,6 +95,8 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self._clip = clip
         self._paused = False
         self._elapsed = start_at
+        self._time_offset = 0.0
+        self._target_time_offset = 0.0
         self._done_event.clear()
         self._start_loop(start_at)
 
@@ -187,7 +199,14 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     if clip is None:
                         break
 
-                    show_time = time.monotonic() - start_time
+                    # Smooth nudge interpolation (exponential ease-out)
+                    diff = self._target_time_offset - self._time_offset
+                    if abs(diff) < 0.001:
+                        self._time_offset = self._target_time_offset
+                    else:
+                        self._time_offset += diff * 0.2
+
+                    show_time = max(0.0, time.monotonic() - start_time + self._time_offset)
 
                     if clip.duration is not None and show_time > clip.duration:
                         show_time = clip.duration
