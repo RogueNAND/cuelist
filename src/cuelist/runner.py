@@ -134,6 +134,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
             if self._thread is not threading.current_thread():
                 self._thread.join()
             self._thread = None
+        self._clip = None
 
     def wait(self) -> None:
         self._done_event.wait()
