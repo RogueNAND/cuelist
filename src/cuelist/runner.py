@@ -177,16 +177,18 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def _start_loop(self, start_at: float) -> None:
         self._stop_event.clear()
         frame_duration = 1.0 / self.fps
-        start_time = time.monotonic() - start_at
+        loop_start = time.monotonic()
+        start_time = loop_start - start_at
         self._thread = threading.Thread(
             target=self._loop,
-            args=(start_time, frame_duration),
+            args=(loop_start, start_time, frame_duration),
             daemon=True,
         )
         self._thread.start()
 
     def _loop(
         self,
+        loop_start: float,
         start_time: float,
         frame_duration: float,
     ) -> None:
@@ -207,7 +209,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     else:
                         self._time_offset += diff * 0.2
 
-                    show_time = max(0.0, time.monotonic() - start_time + self._time_offset)
+                    show_time = time.monotonic() - start_time + self._time_offset
 
                     if clip.duration is not None and show_time > clip.duration:
                         show_time = clip.duration
@@ -230,7 +232,9 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                         break
 
                     frame_count += 1
-                    next_target = start_time + (frame_count * frame_duration)
+                    # Pace frames from loop_start (real wall-clock), not start_time
+                    # (which may be in the future when start_at is negative / pre-cue)
+                    next_target = loop_start + (frame_count * frame_duration)
                     delay = max(0.0, next_target - time.monotonic())
 
                     if self._stop_event.wait(timeout=delay):

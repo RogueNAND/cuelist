@@ -419,14 +419,15 @@ class TestNudge:
         assert runner.elapsed >= 0.0
         runner.stop()
 
-    def test_nudge_clamps_to_zero(self) -> None:
+    def test_nudge_allows_negative(self) -> None:
         clip = InfiniteClip(value=1.0)
         runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
         runner.play(clip)
         time.sleep(0.05)
         runner.nudge(-10.0)
         time.sleep(0.1)
-        assert runner.elapsed >= 0.0
+        # Negative times are allowed (pre-cue support)
+        assert runner.elapsed < 0.0
         runner.stop()
 
     def test_play_resets_offset(self) -> None:
