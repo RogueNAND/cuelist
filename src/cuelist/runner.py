@@ -45,6 +45,9 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     _paused: bool = field(default=False, init=False, repr=False)
     _time_offset: float = field(default=0.0, init=False, repr=False)
     _target_time_offset: float = field(default=0.0, init=False, repr=False)
+    _loop_start: float = field(default=0.0, init=False, repr=False)
+    _loops_remaining: int = field(default=0, init=False, repr=False)
+    _current_loop: int = field(default=0, init=False, repr=False)
 
     @property
     def is_paused(self) -> bool:
@@ -54,6 +57,16 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def elapsed(self) -> float:
         """Current playback position in seconds."""
         return self._elapsed
+
+    @property
+    def current_loop(self) -> int:
+        """Zero-based index of the current loop iteration."""
+        return self._current_loop
+
+    @property
+    def loops_remaining(self) -> int:
+        """Remaining loop iterations. -1 means infinite, 0 means done."""
+        return self._loops_remaining
 
     def set_elapsed(self, t: float) -> None:
         """Set the current playback position (seconds). For use by external controllers."""
@@ -90,6 +103,8 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self,
         clip: Clip[Ctx, Target, Delta],
         start_at: float = 0.0,
+        loops: int = 0,
+        loop_start: float = 0.0,
     ) -> None:
         self.stop()
         self._clip = clip
@@ -97,6 +112,9 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self._elapsed = start_at
         self._time_offset = 0.0
         self._target_time_offset = 0.0
+        self._loops_remaining = loops
+        self._loop_start = loop_start
+        self._current_loop = 0
         self._done_event.clear()
         self._start_loop(start_at)
 
@@ -139,8 +157,11 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def wait(self) -> None:
         self._done_event.wait()
 
-    def play_sync(self, clip: Clip[Ctx, Target, Delta], start_at: float = 0.0) -> None:
-        self.play(clip, start_at)
+    def play_sync(
+        self, clip: Clip[Ctx, Target, Delta], start_at: float = 0.0,
+        loops: int = 0, loop_start: float = 0.0,
+    ) -> None:
+        self.play(clip, start_at, loops=loops, loop_start=loop_start)
         try:
             self.wait()
         except KeyboardInterrupt:
@@ -229,6 +250,17 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                         log.exception("Error rendering frame at %.3fs", show_time)
 
                     if clip.duration is not None and show_time >= clip.duration:
+                        if self._loops_remaining != 0:  # -1 (infinite) or positive
+                            if self._loops_remaining > 0:
+                                self._loops_remaining -= 1
+                            self._current_loop += 1
+                            # Reset timing to loop_start
+                            loop_start = time.monotonic()
+                            start_time = loop_start - self._loop_start
+                            self._time_offset = 0.0
+                            self._target_time_offset = 0.0
+                            frame_count = 0
+                            continue
                         break
 
                     frame_count += 1

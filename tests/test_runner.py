@@ -463,3 +463,148 @@ class TestNudge:
         assert runner._time_offset < 0.5  # should not have jumped to 1.0 yet
         assert runner._time_offset > 0.0  # but should have started moving
         runner.stop()
+
+
+# --- loop ---
+
+
+class TestLoop:
+    def test_no_loop_default(self) -> None:
+        """loops=0 plays once and current_loop stays at 0."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=0)
+        runner.wait()
+        assert runner.current_loop == 0
+
+    def test_finite_loop_count(self) -> None:
+        """loops=2 plays 3 times total, current_loop ends at 2."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=2)
+        runner.wait()
+        assert runner.current_loop == 2
+
+    def test_single_loop(self) -> None:
+        """loops=1 plays 2 times total."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=1)
+        runner.wait()
+        assert runner.current_loop == 1
+
+    def test_infinite_loop_stops_on_stop(self) -> None:
+        """loops=-1 runs until stop() is called."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1)
+        time.sleep(0.3)
+        assert runner.current_loop >= 2  # should have looped multiple times
+        runner.stop()
+
+    def test_loop_start_point(self) -> None:
+        """Loops restart at loop_start, not at 0."""
+        times_per_loop: list[list[float]] = [[]]
+        loop_tracker = [0]
+
+        class TimingClip:
+            @property
+            def duration(self) -> float:
+                return 0.08
+
+            def render(self, t: float, ctx: object) -> dict[str, float]:
+                times_per_loop[-1].append(t)
+                return {"ch": t}
+
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+
+        def tracking_apply(d):
+            if runner.current_loop > loop_tracker[0]:
+                loop_tracker[0] = runner.current_loop
+                times_per_loop.append([])
+            return d
+
+        runner.apply_fn = tracking_apply
+        runner.play(TimingClip(), start_at=0.0, loops=1, loop_start=0.03)
+        runner.wait()
+        # Second iteration should start near loop_start (0.03)
+        assert len(times_per_loop) >= 2
+        second_start = times_per_loop[1][0] if times_per_loop[1] else 0
+        assert second_start >= 0.02  # should be near 0.03, not 0.0
+
+    def test_elapsed_resets_on_loop(self) -> None:
+        """elapsed reports position within current loop, not total time."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=2)
+        runner.wait()
+        # After completion, elapsed should be at or near clip duration (final loop)
+        assert runner.elapsed <= clip.clip_duration + 0.05
+
+    def test_pause_resume_during_loop(self) -> None:
+        """Pause and resume work correctly mid-loop."""
+        clip = StubClip(value=1.0, clip_duration=0.1)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=2)
+        time.sleep(0.05)  # mid first iteration
+        runner.pause()
+        assert runner.is_paused
+        runner.resume()
+        runner.wait()
+        # Should have completed all loops
+        assert runner.current_loop == 2
+        assert not runner.is_paused
+
+    def test_wait_blocks_until_all_loops(self) -> None:
+        """wait() only returns after all loops complete."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=3)
+        runner.wait()
+        # After wait returns, all loops should be done
+        assert runner.current_loop == 3
+        # Thread may still be exiting its finally block; give it a moment
+        time.sleep(0.02)
+        assert runner.state == "stopped"
+
+    def test_play_resets_loop_state(self) -> None:
+        """Calling play() again resets loop counters."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=2)
+        runner.wait()
+        assert runner.current_loop == 2
+        # Play again without loops
+        runner.play(clip)
+        runner.wait()
+        assert runner.current_loop == 0
+        assert runner.loops_remaining == 0
+
+    def test_loops_remaining_decrements(self) -> None:
+        """loops_remaining counts down as loops execute."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=3)
+        runner.wait()
+        assert runner.loops_remaining == 0
+        assert runner.current_loop == 3
+
+    def test_infinite_loops_remaining_stays_negative(self) -> None:
+        """loops_remaining stays -1 during infinite looping."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1)
+        time.sleep(0.2)
+        assert runner.loops_remaining == -1
+        runner.stop()
+
+    def test_nudge_resets_on_loop_boundary(self) -> None:
+        """Nudge offsets are cleared when a new loop iteration starts."""
+        clip = StubClip(value=1.0, clip_duration=0.08)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=1)
+        time.sleep(0.03)
+        runner.nudge(0.5)
+        runner.wait()
+        # Should still complete (nudge accelerated first loop, but reset on second)
+        assert runner.current_loop == 1
