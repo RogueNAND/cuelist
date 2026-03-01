@@ -74,8 +74,39 @@ class AsyncInfiniteClip:
         return {"ch": self.value}
 
 
+@dataclass
+class DummyClip:
+    """Minimal clip for serde/registry tests. Renders {"ch": t}."""
+
+    duration: float
+
+    def render(self, t, ctx):
+        return {"ch": t}
+
+
 def sum_compose(deltas: list[float]) -> float:
     return sum(deltas)
+
+
+def make_registry():
+    """Create a ClipRegistry with a 'test_clip' factory pre-registered."""
+    from cuelist.registry import ClipRegistry
+
+    reg = ClipRegistry()
+    reg.register(
+        "test_clip",
+        lambda duration=4, color=(1, 1, 1), level=1.0, **kw: DummyClip(duration),
+    )
+    return reg
+
+
+def make_load_fn(timelines_dict):
+    """Create a load_fn that resolves timeline names from a dict."""
+    def load_fn(name):
+        if name not in timelines_dict:
+            raise KeyError(f"Timeline '{name}' not found")
+        return timelines_dict[name]
+    return load_fn
 
 
 @pytest.fixture

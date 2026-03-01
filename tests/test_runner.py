@@ -608,3 +608,57 @@ class TestLoop:
         runner.wait()
         # Should still complete (nudge accelerated first loop, but reset on second)
         assert runner.current_loop == 1
+
+    def test_set_loop_params_updates_remaining_and_start(self) -> None:
+        """set_loop_params updates loops_remaining and loop_start."""
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        clip = StubClip(value=1.0, clip_duration=0.1)
+        runner.play(clip, loops=0, loop_start=0.0)
+        runner.set_loop_params(3, loop_start=0.02)
+        assert runner.loops_remaining == 3
+        assert runner.loop_start == 0.02
+        runner.stop()
+
+    def test_set_loop_params_none_preserves_loop_start(self) -> None:
+        """set_loop_params with loop_start=None keeps existing loop_start."""
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        clip = StubClip(value=1.0, clip_duration=0.1)
+        runner.play(clip, loops=0, loop_start=0.05)
+        runner.set_loop_params(2)
+        assert runner.loops_remaining == 2
+        assert runner.loop_start == 0.05
+        runner.stop()
+
+    def test_loop_start_property(self) -> None:
+        """loop_start property returns current value."""
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        assert runner.loop_start == 0.0  # default
+        clip = StubClip(value=1.0, clip_duration=0.1)
+        runner.play(clip, loop_start=0.03)
+        assert runner.loop_start == 0.03
+        runner.stop()
+
+    def test_set_loop_params_finite_to_infinite(self) -> None:
+        """set_loop_params mid-playback: finite -> infinite keeps playing."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=0)  # no looping
+        time.sleep(0.01)
+        runner.set_loop_params(-1)  # switch to infinite
+        time.sleep(0.2)
+        # Should have looped multiple times now
+        assert runner.current_loop >= 1
+        assert runner.loops_remaining == -1
+        runner.stop()
+
+    def test_set_loop_params_infinite_to_stop(self) -> None:
+        """set_loop_params mid-playback: infinite -> stop after current."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1)
+        time.sleep(0.2)
+        assert runner.current_loop >= 1
+        runner.set_loop_params(0)  # stop after current iteration
+        runner.wait()
+        # Should have stopped
+        assert runner.loops_remaining == 0

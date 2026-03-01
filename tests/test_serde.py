@@ -1,7 +1,5 @@
 """Tests for serde variable resolution and round-trip serialization."""
 
-from dataclasses import dataclass
-
 import pytest
 
 from cuelist.registry import ClipRegistry
@@ -12,21 +10,7 @@ from cuelist.serde import (
     serialize_timeline,
 )
 
-
-# -- helpers ------------------------------------------------------------------
-
-@dataclass
-class DummyClip:
-    duration: float
-
-    def render(self, t, ctx):
-        return {}
-
-
-def make_registry():
-    reg = ClipRegistry()
-    reg.register("test_clip", lambda duration=4, color=(1, 1, 1), level=1.0: DummyClip(duration))
-    return reg
+from conftest import DummyClip, make_registry
 
 
 # -- _resolve_variables -------------------------------------------------------
@@ -37,25 +21,16 @@ class TestResolveVariables:
         params = {"a": 1, "b": "hello"}
         assert _resolve_variables(params, {}) == params
 
-    def test_number_variable(self):
-        variables = {"x": {"type": "number", "value": 42}}
-        params = {"level": {"$var": "x"}}
-        assert _resolve_variables(params, variables) == {"level": 42}
-
-    def test_color_variable(self):
-        variables = {"red": {"type": "color", "value": [1, 0, 0]}}
-        params = {"color": {"$var": "red"}}
-        assert _resolve_variables(params, variables) == {"color": [1, 0, 0]}
-
-    def test_string_variable(self):
-        variables = {"name": {"type": "string", "value": "hello"}}
-        params = {"label": {"$var": "name"}}
-        assert _resolve_variables(params, variables) == {"label": "hello"}
-
-    def test_boolean_variable(self):
-        variables = {"flag": {"type": "boolean", "value": True}}
-        params = {"enabled": {"$var": "flag"}}
-        assert _resolve_variables(params, variables) == {"enabled": True}
+    @pytest.mark.parametrize("var_type, var_value, param_key, expected", [
+        pytest.param("number", 42, "level", 42, id="number"),
+        pytest.param("color", [1, 0, 0], "color", [1, 0, 0], id="color"),
+        pytest.param("string", "hello", "label", "hello", id="string"),
+        pytest.param("boolean", True, "enabled", True, id="boolean"),
+    ])
+    def test_typed_variable(self, var_type, var_value, param_key, expected):
+        variables = {"x": {"type": var_type, "value": var_value}}
+        params = {param_key: {"$var": "x"}}
+        assert _resolve_variables(params, variables) == {param_key: expected}
 
     def test_tuple_mixed_literal_and_var(self):
         variables = {"red": {"type": "color", "value": [1, 0, 0]}}

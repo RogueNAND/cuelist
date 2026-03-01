@@ -70,11 +70,11 @@ class TestBeatTimeRoundtrip:
         tm = TempoMap(120.0)
         assert tm.time(tm.beat(3.0)) == pytest.approx(3.0)
 
-    def test_roundtrip_with_tempo_change(self) -> None:
+    @pytest.mark.parametrize("beats", [1.0, 4.0, 6.0, 10.0])
+    def test_roundtrip_with_tempo_change(self, beats) -> None:
         tm = TempoMap(120.0)
         tm.set_tempo(4, 60.0)
-        for beats in [1.0, 4.0, 6.0, 10.0]:
-            assert tm.beat(tm.time(beats)) == pytest.approx(beats)
+        assert tm.beat(tm.time(beats)) == pytest.approx(beats)
 
 
 # --- Tempo changes ---
@@ -237,64 +237,6 @@ class TestSetTempoDedup:
         assert len(tm._changes) == 3
         assert tm._changes[1] == (4, 90.0)
         assert tm._changes[2] == (8, 240.0)
-
-
-# --- BPMTimeline remove/clear ---
-
-
-class TestBPMTimelineRemove:
-    def test_remove_existing(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        clip = StubClip(value=1.0, clip_duration=2.0)
-        bt.add(0, clip)
-        bt.remove(0, clip)
-        assert len(bt.events) == 0
-
-    def test_remove_nonexistent_raises(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        clip = StubClip(value=1.0, clip_duration=2.0)
-        with pytest.raises(ValueError):
-            bt.remove(0, clip)
-
-    def test_remove_first_of_duplicates(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        clip = StubClip(value=1.0, clip_duration=2.0)
-        bt.add(0, clip)
-        bt.add(0, clip)
-        bt.remove(0, clip)
-        assert len(bt.events) == 1
-
-    def test_remove_returns_self(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        clip = StubClip(value=1.0, clip_duration=2.0)
-        bt.add(0, clip)
-        result = bt.remove(0, clip)
-        assert result is bt
-
-
-class TestBPMTimelineClear:
-    def test_clear_empties_events(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        bt.add(0, StubClip(value=1.0, clip_duration=2.0))
-        bt.add(4, StubClip(value=2.0, clip_duration=3.0))
-        bt.clear()
-        assert len(bt.events) == 0
-
-    def test_clear_resets_duration(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        bt.add(0, StubClip(value=1.0, clip_duration=2.0))
-        bt.clear()
-        assert bt.duration == 0.0
-
-    def test_clear_on_empty(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        bt.clear()
-        assert len(bt.events) == 0
-
-    def test_clear_returns_self(self) -> None:
-        bt = BPMTimeline(compose_fn=sum_compose)
-        result = bt.clear()
-        assert result is bt
 
 
 # --- BPMTimeline negative positions ---

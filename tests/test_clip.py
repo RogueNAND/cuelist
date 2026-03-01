@@ -5,8 +5,20 @@ import asyncio
 import pytest
 
 from cuelist import BPMTimeline, Clip, Timeline
+from cuelist.tempo import TempoMap
 
 from conftest import InfiniteClip, StubClip, resolve, sum_compose
+
+
+@pytest.fixture(params=[
+    pytest.param("Timeline", id="Timeline"),
+    pytest.param("BPMTimeline", id="BPMTimeline"),
+])
+def any_timeline(request):
+    """Provide both Timeline and BPMTimeline for parametrized tests."""
+    if request.param == "Timeline":
+        return Timeline(compose_fn=sum_compose)
+    return BPMTimeline(compose_fn=sum_compose)
 
 
 # --- Clip protocol conformance ---
@@ -106,54 +118,54 @@ class TestChainableAdd:
         assert len(tl.events) == 2
 
 
-# --- Timeline remove/clear ---
+# --- Timeline/BPMTimeline remove/clear (parametrized) ---
 
 
-class TestTimelineRemove:
-    def test_remove_existing(self, timeline: Timeline) -> None:
+class TestRemove:
+    def test_remove_existing(self, any_timeline) -> None:
         clip = StubClip(value=1.0, clip_duration=2.0)
-        timeline.add(0.0, clip)
-        timeline.remove(0.0, clip)
-        assert len(timeline.events) == 0
+        any_timeline.add(0.0, clip)
+        any_timeline.remove(0.0, clip)
+        assert len(any_timeline.events) == 0
 
-    def test_remove_nonexistent_raises(self, timeline: Timeline) -> None:
+    def test_remove_nonexistent_raises(self, any_timeline) -> None:
         clip = StubClip(value=1.0, clip_duration=2.0)
         with pytest.raises(ValueError):
-            timeline.remove(0.0, clip)
+            any_timeline.remove(0.0, clip)
 
-    def test_remove_first_of_duplicates(self, timeline: Timeline) -> None:
+    def test_remove_first_of_duplicates(self, any_timeline) -> None:
         clip = StubClip(value=1.0, clip_duration=2.0)
-        timeline.add(0.0, clip)
-        timeline.add(0.0, clip)
-        timeline.remove(0.0, clip)
-        assert len(timeline.events) == 1
+        any_timeline.add(0.0, clip)
+        any_timeline.add(0.0, clip)
+        any_timeline.remove(0.0, clip)
+        assert len(any_timeline.events) == 1
 
-    def test_remove_returns_self(self, timeline: Timeline) -> None:
+    def test_remove_returns_self(self, any_timeline) -> None:
         clip = StubClip(value=1.0, clip_duration=2.0)
-        timeline.add(0.0, clip)
-        result = timeline.remove(0.0, clip)
-        assert result is timeline
+        any_timeline.add(0.0, clip)
+        result = any_timeline.remove(0.0, clip)
+        assert result is any_timeline
 
 
-class TestTimelineClear:
-    def test_clear_empties_events(self, timeline: Timeline) -> None:
-        timeline.add(0.0, StubClip(value=1.0, clip_duration=2.0))
-        timeline.add(1.0, StubClip(value=2.0, clip_duration=3.0))
-        timeline.clear()
-        assert len(timeline.events) == 0
+class TestClear:
+    def test_clear_empties_events(self, any_timeline) -> None:
+        any_timeline.add(0.0, StubClip(value=1.0, clip_duration=2.0))
+        any_timeline.add(1.0, StubClip(value=2.0, clip_duration=3.0))
+        any_timeline.clear()
+        assert len(any_timeline.events) == 0
 
-    def test_clear_resets_duration(self, timeline: Timeline) -> None:
-        timeline.add(0.0, StubClip(value=1.0, clip_duration=2.0))
-        timeline.clear()
-        assert timeline.duration == 0.0
+    def test_clear_resets_duration(self, any_timeline) -> None:
+        any_timeline.add(0.0, StubClip(value=1.0, clip_duration=2.0))
+        any_timeline.clear()
+        assert any_timeline.duration == 0.0
 
-    def test_clear_on_empty(self, timeline: Timeline) -> None:
-        timeline.clear()
-        assert len(timeline.events) == 0
+    def test_clear_on_empty(self, any_timeline) -> None:
+        any_timeline.clear()
+        assert len(any_timeline.events) == 0
 
-    def test_clear_returns_self(self, timeline: Timeline) -> None:
-        result = timeline.clear()
-        assert result is timeline
+    def test_clear_returns_self(self, any_timeline) -> None:
+        result = any_timeline.clear()
+        assert result is any_timeline
 
 
 # --- Nested timelines ---

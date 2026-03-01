@@ -1,99 +1,40 @@
 """Tests for ScaledClip, fade envelope, serde round-trip, and recursive verify."""
 
-from dataclasses import dataclass
-
 import pytest
 
 from cuelist.clip import NestedBPMClip, ScaledClip, Timeline, _fade_envelope, clip
-from cuelist.registry import ClipRegistry
 from cuelist.serde import MetadataClip, deserialize_timeline, serialize_timeline
 from cuelist.tempo import BPMTimeline, TempoMap
 from cuelist.verify import collect_verify_points
 
-from conftest import sum_compose
-
-
-# -- helpers ------------------------------------------------------------------
-
-@dataclass
-class DummyClip:
-    duration: float
-
-    def render(self, t, ctx):
-        return {"ch": t}
-
-
-def make_registry():
-    reg = ClipRegistry()
-    reg.register("test_clip", lambda duration=4, **kw: DummyClip(duration))
-    return reg
-
-
-def make_load_fn(timelines_dict):
-    def load_fn(name):
-        if name not in timelines_dict:
-            raise KeyError(f"Timeline '{name}' not found")
-        return timelines_dict[name]
-    return load_fn
+from conftest import make_load_fn, make_registry, sum_compose
 
 
 # -- _fade_envelope tests ----------------------------------------------------
 
 class TestFadeEnvelope:
 
-    def test_no_fade_returns_one(self):
-        """Full output when no fade in/out."""
-        assert _fade_envelope(0.5, 2.0, 0, 0) == 1.0
-
-    def test_none_duration_returns_one(self):
-        """None duration returns 1.0 regardless of fade params."""
-        assert _fade_envelope(0.5, None, 0.5, 0.5) == 1.0
-
-    def test_zero_duration_returns_one(self):
-        """Zero duration returns 1.0."""
-        assert _fade_envelope(0.0, 0.0, 0.5, 0.5) == 1.0
-
-    def test_fade_in_at_zero(self):
-        """t=0 with fade_in > 0 returns 0."""
-        assert _fade_envelope(0.0, 2.0, 1.0, 0) == 0.0
-
-    def test_fade_in_midpoint(self):
-        """Halfway through fade_in returns 0.5."""
-        assert _fade_envelope(0.5, 2.0, 1.0, 0) == pytest.approx(0.5)
-
-    def test_fade_in_complete(self):
-        """At end of fade_in period, returns 1.0."""
-        assert _fade_envelope(1.0, 2.0, 1.0, 0) == pytest.approx(1.0)
-
-    def test_fade_out_at_end(self):
-        """At t=duration with fade_out > 0 returns 0."""
-        assert _fade_envelope(2.0, 2.0, 0, 1.0) == pytest.approx(0.0)
-
-    def test_fade_out_midpoint(self):
-        """Halfway through fade_out returns 0.5."""
-        assert _fade_envelope(1.5, 2.0, 0, 1.0) == pytest.approx(0.5)
-
-    def test_fade_out_start(self):
-        """At the start of fade_out period, returns 1.0."""
-        assert _fade_envelope(1.0, 2.0, 0, 1.0) == pytest.approx(1.0)
+    @pytest.mark.parametrize("t, duration, fade_in, fade_out, expected", [
+        pytest.param(0.5, 2.0, 0, 0, 1.0, id="no_fade_returns_one"),
+        pytest.param(0.5, None, 0.5, 0.5, 1.0, id="none_duration_returns_one"),
+        pytest.param(0.0, 0.0, 0.5, 0.5, 1.0, id="zero_duration_returns_one"),
+        pytest.param(0.0, 2.0, 1.0, 0, 0.0, id="fade_in_at_zero"),
+        pytest.param(0.5, 2.0, 1.0, 0, 0.5, id="fade_in_midpoint"),
+        pytest.param(1.0, 2.0, 1.0, 0, 1.0, id="fade_in_complete"),
+        pytest.param(2.0, 2.0, 0, 1.0, 0.0, id="fade_out_at_end"),
+        pytest.param(1.5, 2.0, 0, 1.0, 0.5, id="fade_out_midpoint"),
+        pytest.param(1.0, 2.0, 0, 1.0, 1.0, id="fade_out_start"),
+        pytest.param(0.5, 1.0, 1.0, 1.0, 0.5, id="overlapping_fades"),
+        pytest.param(0.5, 1.0, 0, 0, 1.0, id="clamp_never_exceeds_one"),
+    ])
+    def test_fade_envelope(self, t, duration, fade_in, fade_out, expected):
+        assert _fade_envelope(t, duration, fade_in, fade_out) == pytest.approx(expected)
 
     def test_both_fades(self):
         """Both fade_in and fade_out at their respective midpoints."""
-        # 4s duration, 2s fade_in, 2s fade_out
         assert _fade_envelope(1.0, 4.0, 2.0, 2.0) == pytest.approx(0.5)  # fade_in mid
         assert _fade_envelope(2.0, 4.0, 2.0, 2.0) == pytest.approx(1.0)  # both boundaries
         assert _fade_envelope(3.0, 4.0, 2.0, 2.0) == pytest.approx(0.5)  # fade_out mid
-
-    def test_overlapping_fades(self):
-        """When fade_in + fade_out > duration, both clamp correctly."""
-        # 1s duration, fade_in=1, fade_out=1 -- they overlap completely
-        # At t=0.5: fade_in gives 0.5, fade_out gives (1.0-0.5)/1.0 = 0.5
-        result = _fade_envelope(0.5, 1.0, 1.0, 1.0)
-        assert result == pytest.approx(0.5)
-
-    def test_clamp_never_exceeds_one(self):
-        """Result is always clamped to [0, 1]."""
-        assert _fade_envelope(0.5, 1.0, 0, 0) == 1.0
 
     def test_clamp_never_below_zero(self):
         """Result is always clamped to [0, 1] even for edge values."""
