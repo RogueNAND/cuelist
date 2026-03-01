@@ -72,6 +72,22 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         """Set the current playback position (seconds). For use by external controllers."""
         self._elapsed = t
 
+    def set_loop_params(self, loops_remaining: int, loop_start: float | None = None) -> None:
+        """Update loop parameters during playback.
+
+        Args:
+            loops_remaining: New loops remaining count (-1 = infinite, 0 = stop after current).
+            loop_start: New loop start position in seconds, or None to keep current.
+        """
+        self._loops_remaining = loops_remaining
+        if loop_start is not None:
+            self._loop_start = loop_start
+
+    @property
+    def loop_start(self) -> float:
+        """Current loop start position in seconds."""
+        return self._loop_start
+
     def nudge(self, delta: float) -> None:
         """Shift the playback clock by *delta* seconds (positive = forward).
 
