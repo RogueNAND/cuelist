@@ -662,3 +662,99 @@ class TestLoop:
         runner.wait()
         # Should have stopped
         assert runner.loops_remaining == 0
+
+
+# --- region_end ---
+
+
+class TestRegionEnd:
+    def test_region_end_stops_at_region(self) -> None:
+        """loops=0 with region_end: playback stops at region_end, not clip.duration."""
+        # Clip is 0.3s; region_end is 0.1s — runner should stop well before clip ends.
+        clip = StubClip(value=1.0, clip_duration=0.3)
+        elapsed_samples: list[float] = []
+        runner = Runner(
+            ctx=None,
+            apply_fn=lambda d: d,
+            output_fn=lambda out: elapsed_samples.append(runner.elapsed),
+            fps=40.0,
+        )
+        runner.play(clip, loops=0, region_end=0.1)
+        runner.wait()
+        # The runner must have stopped at or very near region_end (0.1s), not at 0.3s.
+        assert runner.elapsed <= 0.1 + 0.05  # allow one-frame overshoot
+        assert runner.current_loop == 0
+        # Thread may still be exiting its finally block; give it a moment.
+        time.sleep(0.02)
+        assert runner.state == "stopped"
+
+    def test_region_end_loops(self) -> None:
+        """loops=-1 with region_end: runner loops at region_end boundary."""
+        # Clip is 0.3s; region_end is 0.08s — each iteration should be ~0.08s.
+        clip = StubClip(value=1.0, clip_duration=0.3)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1, region_end=0.08)
+        # After 0.5s with 0.08s iterations we expect at least 4 full loops.
+        time.sleep(0.5)
+        assert runner.current_loop >= 4
+        assert runner.loops_remaining == -1  # still infinite
+        runner.stop()
+
+    def test_region_end_clamped_to_duration(self) -> None:
+        """region_end > clip.duration: effective end is clamped to clip.duration."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        # region_end far exceeds clip duration — should still finish at clip.duration.
+        runner.play(clip, loops=0, region_end=999.0)
+        runner.wait()
+        # Elapsed must be close to clip.duration (0.05s), not 999s.
+        assert runner.elapsed <= clip.clip_duration + 0.05
+        # Thread may still be exiting its finally block; give it a moment.
+        time.sleep(0.02)
+        assert runner.state == "stopped"
+
+    def test_stop_clears_region_end(self) -> None:
+        """stop() resets _region_end to None."""
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, region_end=0.5)
+        assert runner.region_end == 0.5
+        runner.stop()
+        assert runner.region_end is None
+
+    def test_no_region_end_unchanged(self) -> None:
+        """Default region_end=None: behavior is identical to pre-region_end baseline."""
+        clip = StubClip(value=1.0, clip_duration=0.05)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        # No region_end argument — must behave exactly as before.
+        runner.play(clip)
+        runner.wait()
+        assert runner.region_end is None
+        assert runner.elapsed <= clip.clip_duration + 0.05
+        # Thread may still be exiting its finally block; give it a moment.
+        time.sleep(0.02)
+        assert runner.state == "stopped"
+
+    def test_set_loop_params_updates_region_end(self) -> None:
+        """set_loop_params(region_end=...) updates region_end mid-playback."""
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1, region_end=0.5)
+        assert runner.region_end == 0.5
+        # Update region_end mid-playback
+        runner.set_loop_params(-1, region_end=0.3)
+        assert runner.region_end == 0.3
+        # Clear region_end
+        runner.set_loop_params(-1, region_end=None)
+        assert runner.region_end is None
+        runner.stop()
+
+    def test_set_loop_params_default_preserves_region_end(self) -> None:
+        """set_loop_params without region_end kwarg keeps current value."""
+        clip = InfiniteClip(value=1.0)
+        runner = Runner(ctx=None, apply_fn=lambda d: d, fps=40.0)
+        runner.play(clip, loops=-1, region_end=0.5)
+        # Omit region_end (uses default sentinel ...) — should preserve 0.5
+        runner.set_loop_params(-1)
+        assert runner.region_end == 0.5
+        runner.stop()

@@ -48,6 +48,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     _loop_start: float = field(default=0.0, init=False, repr=False)
     _loops_remaining: int = field(default=0, init=False, repr=False)
     _current_loop: int = field(default=0, init=False, repr=False)
+    _region_end: float | None = field(default=None, init=False, repr=False)
 
     @property
     def is_paused(self) -> bool:
@@ -72,16 +73,29 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         """Set the current playback position (seconds). For use by external controllers."""
         self._elapsed = t
 
-    def set_loop_params(self, loops_remaining: int, loop_start: float | None = None) -> None:
+    def set_loop_params(
+        self,
+        loops_remaining: int,
+        loop_start: float | None = None,
+        region_end: float | None = ...,
+    ) -> None:
         """Update loop parameters during playback.
 
         Args:
             loops_remaining: New loops remaining count (-1 = infinite, 0 = stop after current).
             loop_start: New loop start position in seconds, or None to keep current.
+            region_end: New region end in seconds, None to clear, or ``...`` (default) to keep current.
         """
         self._loops_remaining = loops_remaining
         if loop_start is not None:
             self._loop_start = loop_start
+        if region_end is not ...:
+            self._region_end = region_end
+
+    @property
+    def region_end(self) -> float | None:
+        """Region end position in seconds, or None if no region is active."""
+        return self._region_end
 
     @property
     def loop_start(self) -> float:
@@ -121,6 +135,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         start_at: float = 0.0,
         loops: int = 0,
         loop_start: float = 0.0,
+        region_end: float | None = None,
     ) -> None:
         self.stop()
         self._clip = clip
@@ -131,6 +146,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self._loops_remaining = loops
         self._loop_start = loop_start
         self._current_loop = 0
+        self._region_end = region_end
         self._done_event.clear()
         self._start_loop(start_at)
 
@@ -169,6 +185,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                 self._thread.join()
             self._thread = None
         self._clip = None
+        self._region_end = None
 
     def wait(self) -> None:
         self._done_event.wait()
@@ -176,8 +193,9 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
     def play_sync(
         self, clip: Clip[Ctx, Target, Delta], start_at: float = 0.0,
         loops: int = 0, loop_start: float = 0.0,
+        region_end: float | None = None,
     ) -> None:
-        self.play(clip, start_at, loops=loops, loop_start=loop_start)
+        self.play(clip, start_at, loops=loops, loop_start=loop_start, region_end=region_end)
         try:
             self.wait()
         except KeyboardInterrupt:
@@ -248,8 +266,14 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
 
                     show_time = time.monotonic() - start_time + self._time_offset
 
-                    if clip.duration is not None and show_time > clip.duration:
-                        show_time = clip.duration
+                    # Effective end: region_end overrides clip.duration,
+                    # clamped to clip.duration if the region extends past the clip.
+                    effective_end = self._region_end if self._region_end is not None else clip.duration
+                    if effective_end is not None and clip.duration is not None:
+                        effective_end = min(effective_end, clip.duration)
+
+                    if effective_end is not None and show_time > effective_end:
+                        show_time = effective_end
 
                     self._elapsed = show_time
 
@@ -265,7 +289,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     except Exception:
                         log.exception("Error rendering frame at %.3fs", show_time)
 
-                    if clip.duration is not None and show_time >= clip.duration:
+                    if effective_end is not None and show_time >= effective_end:
                         if self._loops_remaining != 0:  # -1 (infinite) or positive
                             if self._loops_remaining > 0:
                                 self._loops_remaining -= 1
@@ -288,7 +312,10 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     if self._stop_event.wait(timeout=delay):
                         break
             finally:
-                clip_finished = clip is not None and clip.duration is not None and self._elapsed >= clip.duration
+                eff_end = self._region_end if self._region_end is not None else (clip.duration if clip is not None else None)
+                if eff_end is not None and clip is not None and clip.duration is not None:
+                    eff_end = min(eff_end, clip.duration)
+                clip_finished = clip is not None and eff_end is not None and self._elapsed >= eff_end
                 if not self._paused or clip_finished:
                     self._paused = False
                     self._done_event.set()
