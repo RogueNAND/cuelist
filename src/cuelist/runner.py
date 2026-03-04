@@ -13,6 +13,7 @@ from typing import Callable, Generic, TypeVar
 from .clip import Clip, Ctx, Delta, Target
 
 log = logging.getLogger(__name__)
+_MISSING = object()  # sentinel for "not provided" (distinct from None)
 
 Output = TypeVar("Output")
 
@@ -77,19 +78,19 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         self,
         loops_remaining: int,
         loop_start: float | None = None,
-        region_end: float | None = ...,
+        region_end: float | None = _MISSING,
     ) -> None:
         """Update loop parameters during playback.
 
         Args:
             loops_remaining: New loops remaining count (-1 = infinite, 0 = stop after current).
             loop_start: New loop start position in seconds, or None to keep current.
-            region_end: New region end in seconds, None to clear, or ``...`` (default) to keep current.
+            region_end: New region end in seconds, None to clear, or _MISSING (default) to keep current.
         """
         self._loops_remaining = loops_remaining
         if loop_start is not None:
             self._loop_start = loop_start
-        if region_end is not ...:
+        if region_end is not _MISSING:
             self._region_end = region_end
 
     @property
@@ -241,6 +242,37 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
         )
         self._thread.start()
 
+    def _interpolate_nudge(self) -> None:
+        """Smooth nudge offset toward its target (exponential ease-out)."""
+        diff = self._target_time_offset - self._time_offset
+        if abs(diff) < 0.001:
+            self._time_offset = self._target_time_offset
+        else:
+            self._time_offset += diff * 0.2
+
+    @staticmethod
+    def _effective_end(clip: Clip, region_end: float | None) -> float | None:
+        """Compute the effective playback endpoint, clamped to clip duration."""
+        end = region_end if region_end is not None else clip.duration
+        if end is not None and clip.duration is not None:
+            end = min(end, clip.duration)
+        return end
+
+    def _handle_loop_boundary(self) -> tuple[float, float, int]:
+        """Advance loop state and return new (loop_start, start_time, frame_count).
+
+        Must only be called when the current iteration has reached its end
+        and loops remain.
+        """
+        if self._loops_remaining > 0:
+            self._loops_remaining -= 1
+        self._current_loop += 1
+        loop_start = time.monotonic()
+        start_time = loop_start - self._loop_start
+        self._time_offset = 0.0
+        self._target_time_offset = 0.0
+        return loop_start, start_time, 0
+
     def _loop(
         self,
         loop_start: float,
@@ -257,21 +289,10 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     if clip is None:
                         break
 
-                    # Smooth nudge interpolation (exponential ease-out)
-                    diff = self._target_time_offset - self._time_offset
-                    if abs(diff) < 0.001:
-                        self._time_offset = self._target_time_offset
-                    else:
-                        self._time_offset += diff * 0.2
-
+                    self._interpolate_nudge()
                     show_time = time.monotonic() - start_time + self._time_offset
 
-                    # Effective end: region_end overrides clip.duration,
-                    # clamped to clip.duration if the region extends past the clip.
-                    effective_end = self._region_end if self._region_end is not None else clip.duration
-                    if effective_end is not None and clip.duration is not None:
-                        effective_end = min(effective_end, clip.duration)
-
+                    effective_end = self._effective_end(clip, self._region_end)
                     if effective_end is not None and show_time > effective_end:
                         show_time = effective_end
 
@@ -291,15 +312,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
 
                     if effective_end is not None and show_time >= effective_end:
                         if self._loops_remaining != 0:  # -1 (infinite) or positive
-                            if self._loops_remaining > 0:
-                                self._loops_remaining -= 1
-                            self._current_loop += 1
-                            # Reset timing to loop_start
-                            loop_start = time.monotonic()
-                            start_time = loop_start - self._loop_start
-                            self._time_offset = 0.0
-                            self._target_time_offset = 0.0
-                            frame_count = 0
+                            loop_start, start_time, frame_count = self._handle_loop_boundary()
                             continue
                         break
 
@@ -312,9 +325,7 @@ class Runner(Generic[Ctx, Target, Delta, Output]):
                     if self._stop_event.wait(timeout=delay):
                         break
             finally:
-                eff_end = self._region_end if self._region_end is not None else (clip.duration if clip is not None else None)
-                if eff_end is not None and clip is not None and clip.duration is not None:
-                    eff_end = min(eff_end, clip.duration)
+                eff_end = self._effective_end(clip, self._region_end) if clip is not None else None
                 clip_finished = clip is not None and eff_end is not None and self._elapsed >= eff_end
                 if not self._paused or clip_finished:
                     self._paused = False
